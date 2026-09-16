@@ -29,6 +29,8 @@
 
 #include "DynamicInitializer.h"
 
+#include <fstream>
+
 #include "cpi/CpiV1.h"
 #include "feat/Feature.h"
 #include "feat/FeatureDatabase.h"
