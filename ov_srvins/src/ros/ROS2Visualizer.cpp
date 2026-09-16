@@ -97,6 +97,9 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node,
   if (node->has_parameter("publish_calibration_tf")) {
     node->get_parameter<bool>("publish_calibration_tf", publish_calibration_tf);
   }
+  if (node->has_parameter("odom_publish_rate_hz")) {
+    node->get_parameter<double>("odom_publish_rate_hz", odom_publish_rate_hz);
+  }
 
   // Load groundtruth if we have it and are not doing simulation
   // NOTE: needs to be a csv ASL format file
@@ -313,6 +316,17 @@ void ROS2Visualizer::visualize_odometry(double timestamp) {
   // Return if we have not inited and a second has passes
   if (!_app->initialized() || (timestamp - _app->initialized_time()) < 1)
     return;
+
+  // Decimate the odomimu publish (pose/twist message + TF) independent of the
+  // IMU sample rate. State propagation already happened in feed_measurement_imu()
+  // before this was called, so estimator accuracy is unaffected.
+  if (odom_publish_rate_hz > 0.0) {
+    double min_dt = 1.0 / odom_publish_rate_hz;
+    if (last_odom_pub_timestamp > 0.0 &&
+        (timestamp - last_odom_pub_timestamp) < min_dt)
+      return;
+    last_odom_pub_timestamp = timestamp;
+  }
 
   // Get fast propagate state at the desired timestamp
   std::shared_ptr<State> state = _app->get_state();
