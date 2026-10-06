@@ -155,6 +155,44 @@ struct VioManagerOptions {
   /// phase
   bool zupt_only_at_beginning = false;
 
+  // SUN SENSOR =============================
+
+  /// If we should use the two-axis sun sensor to aid the global yaw
+  bool try_sun_sensor = false;
+
+  /// Measurement noise on the two sensor angles (rad, 1-sigma)
+  DataType sun_sigma_alpha = 0.0016;
+  DataType sun_sigma_beta = 0.0016;
+
+  /// Reject readings whose ephemeris puts the sun below this elevation - a low
+  /// sun is where refraction and horizon obstruction bite
+  DataType sun_min_elevation_deg = 10.0;
+
+  /// Reject readings whose sun direction is within this angle of gravity. The
+  /// two-vector attitude fix degenerates as the sun approaches the zenith.
+  DataType sun_min_gravity_angle_deg = 15.0;
+
+  /// Mounting of the sun sensor, as the URDF `<origin rpy=...>` of the sensor
+  /// frame in the IMU frame.
+  std::vector<double> sun_extrinsic_rpy_deg = {0.0, 0.0, 0.0};
+
+  /// Sun ephemeris for this session, in the gravity-aligned ENU reference
+  /// frame: azimuth clockwise from true north, elevation above the horizon.
+  /// At the moment this position is read from the config file.
+  DataType sun_azimuth_deg = 0.0;
+  DataType sun_elevation_deg = 45.0;
+
+  /// Solve the G-to-ENU yaw outright from the first usable sun reading rather
+  /// than letting the filter converge on it. Needed whenever the heading
+  /// starts out unknown. Turn it off when sun_align_yaw_deg below is a real
+  /// surveyed value that a single noisy reading should not overwrite.
+  bool sun_init_align_from_first_reading = true;
+
+  /// Initial guess for the yaw from G to ENU (deg). Zero says "the VINS world
+  /// frame already points at true north", which is only true if the filter was
+  /// initialized that way - otherwise let calib_sun_align estimate it.
+  DataType sun_align_yaw_deg = 0.0;
+
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 
@@ -177,6 +215,9 @@ struct VioManagerOptions {
 
   /// Update options for zero velocity (chi2 multiplier)
   UpdaterOptions zupt_options;
+
+  /// Update options for the sun sensor (chi2 multiplier)
+  UpdaterOptions sun_options;
 
   // STATE DEFAULTS ==========================
 

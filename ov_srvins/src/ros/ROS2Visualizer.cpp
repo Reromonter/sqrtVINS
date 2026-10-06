@@ -35,9 +35,12 @@
 #include "state/Propagator.h"
 #include "state/State.h"
 #include "state/StateHelper.h"
+#include "utils/colors.h"
 #include "utils/dataset_reader.h"
 #include "utils/print.h"
 #include "utils/sensor_data.h"
+
+#include <cmath>
 
 using namespace ov_core;
 using namespace ov_type;
@@ -195,6 +198,19 @@ void ROS2Visualizer::setup_subscribers(
       std::bind(&ROS2Visualizer::callback_inertial, this,
                 std::placeholders::_1));
   PRINT_INFO("subscribing to IMU: %s\n", topic_imu.c_str());
+
+  // Create the sun sensor subscriber, if the sun update is enabled
+  if (_app->get_params().try_sun_sensor) {
+    std::string topic_sun;
+    _node->declare_parameter<std::string>("topic_sun",
+                                          "/sun_sensor/measurement");
+    _node->get_parameter("topic_sun", topic_sun);
+    parser->parse_config("topic_sun", topic_sun, false);
+    sub_sun = _node->create_subscription<geometry_msgs::msg::Vector3Stamped>(
+        topic_sun, rclcpp::SensorDataQoS(),
+        std::bind(&ROS2Visualizer::callback_sun, this, std::placeholders::_1));
+    PRINT_INFO("subscribing to SUN SENSOR: %s\n", topic_sun.c_str());
+  }
 
   // Logic for sync stereo subscriber
   // https://answers.ros.org/question/96346/subscribe-to-two-image_raws-with-one-function/?answer=96491#post-id-96491
@@ -482,6 +498,25 @@ void ROS2Visualizer::visualize_final() {
   rT2 = boost::posix_time::microsec_clock::local_time();
   PRINT_INFO(REDPURPLE "TIME: %.3f seconds\n\n" RESET,
              (rT2 - rT1).total_microseconds() * 1e-6);
+}
+
+void ROS2Visualizer::callback_sun(
+    const geometry_msgs::msg::Vector3Stamped::SharedPtr msg) {
+
+  // Pubish sun sensor measurements
+  ov_core::SunSensorData message;
+  message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
+  message.alpha = std::atan2(msg->vector.x, msg->vector.z);
+  message.beta = std::atan2(msg->vector.y, msg->vector.z);
+
+  if (!std::isfinite(message.alpha) || !std::isfinite(message.beta)) {
+    PRINT_DEBUG(YELLOW "sun sensor published a non-finite direction "
+                       "(%.3f, %.3f, %.3f) - ignoring\n" RESET,
+                msg->vector.x, msg->vector.y, msg->vector.z);
+    return;
+  }
+
+  _app->feed_measurement_sun(message);
 }
 
 void ROS2Visualizer::callback_inertial(

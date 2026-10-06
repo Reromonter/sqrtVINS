@@ -31,6 +31,7 @@
 #define OV_SRVINS_INERTIALINITIALIZEROPTIONS_H
 
 #include <Eigen/Eigen>
+#include <cmath>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -115,6 +116,7 @@ struct InertialInitializerOptions {
   double init_prior_ba = 0.1;
 
   double init_prior_t = 0.001;
+  double init_prior_sun_align = M_PI;
   double init_prior_qc = 0.02;
   double init_prior_pc = 0.01;
   double init_prior_fc = 1.0;

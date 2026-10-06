@@ -700,6 +700,14 @@ void StateHelper::initialize_state(std::shared_ptr<State> state,
     }
   }
 
+  // Calibrate sun alignment 
+  if (state->options.do_calib_sun_align) {
+    state->calib_sun_align_yaw->set_local_id(current_id);
+    state->variables_.push_back(state->calib_sun_align_yaw);
+    current_id += state->calib_sun_align_yaw->size();
+  }
+  assert(current_id == state->kCloneStartId);
+
   // Finally initialize our covariance to large value
   state->U_ = MatX::Zero(current_id, current_id);
   MatX U_imu_init = MatX::Identity(15, 15);
@@ -725,6 +733,12 @@ void StateHelper::initialize_state(std::shared_ptr<State> state,
     auto calib_dt_CAMtoIMU = state->calib_dt_CAMtoIMU;
     state->U_(calib_dt_CAMtoIMU->id(), calib_dt_CAMtoIMU->id()) =
         state->init_options.init_prior_t;
+  }
+
+  if (state->options.do_calib_sun_align) {
+    auto calib_sun_align_yaw = state->calib_sun_align_yaw;
+    state->U_(calib_sun_align_yaw->id(), calib_sun_align_yaw->id()) =
+        state->init_options.init_prior_sun_align;
   }
 
   if (state->options.do_calib_camera_pose) {

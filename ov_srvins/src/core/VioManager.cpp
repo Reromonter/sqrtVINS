@@ -41,6 +41,7 @@
 #include "utils/DataType.h"
 #include "utils/opencv_lambda_body.h"
 #include "utils/print.h"
+#include "utils/quat_ops.h"
 #include "utils/sensor_data.h"
 
 #include "initializer/InertialInitializer.h"
@@ -50,6 +51,7 @@
 #include "state/StateHelper.h"
 #include "update/UpdaterMSCKF.h"
 #include "update/UpdaterSLAM.h"
+#include "update/UpdaterSunSensor.h"
 #include "update/UpdaterZeroVelocity.h"
 
 using namespace ov_core;
@@ -179,6 +181,38 @@ VioManager::VioManager(VioManagerOptions &params_)
         params.zupt_max_velocity, params.zupt_noise_multiplier,
         params.zupt_max_disparity);
   }
+
+  // If we are aiding the global yaw with a sun sensor, then create the updater
+  if (params.try_sun_sensor) {
+    // URDF rpy gives the sensor's orientation in the IMU frame
+    const auto &rpy = params.sun_extrinsic_rpy_deg;
+    const Mat3 R_ItoS =
+        (ov_core::rot_z<DataType>(rpy.at(2) * M_PI / 180.0) *
+         ov_core::rot_y<DataType>(rpy.at(1) * M_PI / 180.0) *
+         ov_core::rot_x<DataType>(rpy.at(0) * M_PI / 180.0))
+            .transpose();
+    updaterSun = std::make_shared<UpdaterSunSensor>(
+        params.sun_options, params.sun_sigma_alpha, params.sun_sigma_beta,
+        R_ItoS, params.sun_min_elevation_deg * M_PI / 180.0,
+        params.sun_min_gravity_angle_deg * M_PI / 180.0,
+        params.sun_init_align_from_first_reading);
+
+    // The yaw from G to the ephemeris frame
+    VecX temp_sun_align_yaw;
+    temp_sun_align_yaw.resize(1);
+    temp_sun_align_yaw(0) = params.sun_align_yaw_deg * M_PI / 180.0;
+    state->calib_sun_align_yaw->set_value(temp_sun_align_yaw);
+    state->calib_sun_align_yaw->set_fej(temp_sun_align_yaw);
+  }
+}
+
+void VioManager::feed_measurement_sun(const ov_core::SunSensorData &message) {
+  if (updaterSun == nullptr)
+    return;
+
+  // Keep only what the next update could still pair with. The state time is
+  // the reference, so anything older than the last state is already unusable.
+  updaterSun->feed_sun(message, state->timestamp);
 }
 
 void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
@@ -660,6 +694,13 @@ void VioManager::do_feature_propagate_update(
   rT8 = boost::posix_time::microsec_clock::local_time();
   StateHelper::update_llt(state);
   state->clear(true);
+
+  // Sun the sun sensor update
+  if (updaterSun != nullptr) {
+    updaterSun->try_update(state, state->timestamp,
+                           params.sun_azimuth_deg * M_PI / 180.0,
+                           params.sun_elevation_deg * M_PI / 180.0);
+  }
 
   //===================================================================================
   // Update our visualization feature set, and clean up the old features

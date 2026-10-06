@@ -33,6 +33,7 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <image_transport/image_transport.hpp>
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
@@ -62,7 +63,12 @@
 #include <Eigen/Eigen>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem.hpp>
+// humble only ships cv_bridge.h; iron and later add (and prefer) .hpp
+#if __has_include(<cv_bridge/cv_bridge.hpp>)
 #include <cv_bridge/cv_bridge.hpp>
+#else
+#include <cv_bridge/cv_bridge.h>
+#endif
 
 namespace ov_core {
 class YamlParser;
@@ -124,6 +130,9 @@ public:
   /// Callback for inertial information
   void callback_inertial(const sensor_msgs::msg::Imu::SharedPtr msg);
 
+  /// Callback for the two-axis sun sensor 
+  void callback_sun(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
+
   /// Callback for monocular cameras information
   void callback_monocular(const sensor_msgs::msg::Image::SharedPtr msg0,
                           int cam_id0);
@@ -173,6 +182,7 @@ protected:
 
   // Our subscribers and camera synchronizers
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
+  rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr sub_sun;
   std::vector<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr>
       subs_cam;
   typedef message_filters::sync_policies::ApproximateTime<

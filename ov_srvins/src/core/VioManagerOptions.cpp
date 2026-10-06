@@ -76,6 +76,20 @@ void VioManagerOptions::print_and_load_estimator(
     parser->parse_config("zupt_noise_multiplier", zupt_noise_multiplier);
     parser->parse_config("zupt_max_disparity", zupt_max_disparity);
     parser->parse_config("zupt_only_at_beginning", zupt_only_at_beginning);
+    parser->parse_config("try_sun_sensor", try_sun_sensor, false);
+    parser->parse_config("up_sun_sigma_alpha", sun_sigma_alpha, false);
+    parser->parse_config("up_sun_sigma_beta", sun_sigma_beta, false);
+    parser->parse_config("up_sun_min_elevation_deg", sun_min_elevation_deg,
+                         false);
+    parser->parse_config("up_sun_min_gravity_angle_deg",
+                         sun_min_gravity_angle_deg, false);
+    parser->parse_config("up_sun_extrinsic_rpy_deg", sun_extrinsic_rpy_deg,
+                         false);
+    parser->parse_config("sun_azimuth_deg", sun_azimuth_deg, false);
+    parser->parse_config("sun_elevation_deg", sun_elevation_deg, false);
+    parser->parse_config("sun_align_yaw_deg", sun_align_yaw_deg, false);
+    parser->parse_config("sun_init_align_from_first_reading",
+                         sun_init_align_from_first_reading, false);
     parser->parse_config("record_timing_information",
                          record_timing_information);
     parser->parse_config("record_timing_filepath", record_timing_filepath);
@@ -86,6 +100,20 @@ void VioManagerOptions::print_and_load_estimator(
   PRINT_DEBUG("  - zupt_noise_multiplier: %.2f\n", zupt_noise_multiplier);
   PRINT_DEBUG("  - zupt_max_disparity: %.4f\n", zupt_max_disparity);
   PRINT_DEBUG("  - zupt_only_at_beginning?: %d\n", zupt_only_at_beginning);
+  PRINT_DEBUG("  - sun_sensor_update: %d\n", try_sun_sensor);
+  PRINT_DEBUG("  - up_sun_sigma_alpha: %.5f\n", sun_sigma_alpha);
+  PRINT_DEBUG("  - up_sun_sigma_beta: %.5f\n", sun_sigma_beta);
+  PRINT_DEBUG("  - up_sun_min_elevation_deg: %.2f\n", sun_min_elevation_deg);
+  PRINT_DEBUG("  - up_sun_min_gravity_angle_deg: %.2f\n",
+              sun_min_gravity_angle_deg);
+  PRINT_DEBUG("  - up_sun_extrinsic_rpy_deg: %.2f, %.2f, %.2f\n",
+              sun_extrinsic_rpy_deg.at(0), sun_extrinsic_rpy_deg.at(1),
+              sun_extrinsic_rpy_deg.at(2));
+  PRINT_DEBUG("  - sun_azimuth_deg: %.4f\n", sun_azimuth_deg);
+  PRINT_DEBUG("  - sun_elevation_deg: %.4f\n", sun_elevation_deg);
+  PRINT_DEBUG("  - sun_align_yaw_deg: %.4f\n", sun_align_yaw_deg);
+  PRINT_DEBUG("  - sun_init_align_from_first_reading: %d\n",
+              sun_init_align_from_first_reading);
   PRINT_DEBUG("  - record timing?: %d\n", (int)record_timing_information);
   PRINT_DEBUG("  - record timing filepath: %s\n",
               record_timing_filepath.c_str());
@@ -126,6 +154,9 @@ void VioManagerOptions::print_and_load_noise(
     aruco_options = UpdaterOptions(chi2_mult, sigma_pix);
     // ZUPT
     parser->parse_config("zupt_chi2_multipler", zupt_options.chi2_multipler);
+    // SUN SENSOR
+    parser->parse_config("up_sun_chi2_multipler", sun_options.chi2_multipler,
+                         false);
   }
   PRINT_DEBUG("  Updater MSCKF Feats:\n");
   msckf_options.print();
@@ -135,6 +166,8 @@ void VioManagerOptions::print_and_load_noise(
   aruco_options.print();
   PRINT_DEBUG("  Updater ZUPT:\n");
   zupt_options.print();
+  PRINT_DEBUG("  Updater SUN SENSOR:\n");
+  PRINT_DEBUG("    - chi2_multipler: %.1f\n", sun_options.chi2_multipler);
 }
 
 void VioManagerOptions::print_and_load_state(

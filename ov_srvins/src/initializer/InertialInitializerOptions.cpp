@@ -69,6 +69,7 @@ void InertialInitializerOptions::print_and_load_initializer(
     parser->parse_config("init_prior_ba", init_prior_ba, false);
 
     parser->parse_config("init_prior_t", init_prior_t, false);
+    parser->parse_config("init_prior_sun_align", init_prior_sun_align, false);
     parser->parse_config("init_prior_qc", init_prior_qc, false);
     parser->parse_config("init_prior_pc", init_prior_pc, false);
     parser->parse_config("init_prior_fc", init_prior_fc, false);
