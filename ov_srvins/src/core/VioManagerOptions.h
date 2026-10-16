@@ -257,8 +257,16 @@ struct VioManagerOptions {
   bool downsize_aruco = true;
 
   /// Will half the resolution all tracking image (aruco will be 1/4 instead of
-  /// halved if dowsize_aruoc also enabled)
+  /// halved if dowsize_aruoc also enabled). Legacy for downsample_scale = 0.5.
   bool downsample_cameras = false;
+
+  /// Resolution scale of all tracking images in (0, 1], e.g. 0.75 turns 640x400
+  /// into 480x300. Resolved together with downsample_cameras when loading.
+  double downsample_scale = 1.0;
+
+  /// Will blur all tracking images with a 5x5 gaussian (the kernel of
+  /// cv::pyrDown) before they are downsampled
+  bool gaussian_blur_cameras = false;
 
   /// Threads our front-end should try to use (opencv uses this also)
   int num_opencv_threads = 4;

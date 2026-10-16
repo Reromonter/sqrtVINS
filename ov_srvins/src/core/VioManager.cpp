@@ -53,6 +53,7 @@
 #include "update/UpdaterSLAM.h"
 #include "update/UpdaterSunSensor.h"
 #include "update/UpdaterZeroVelocity.h"
+#include "utils/ImagePreprocess.h"
 
 using namespace ov_core;
 using namespace ov_type;
@@ -253,16 +254,16 @@ void VioManager::track_image_and_update(
            message_const.sensor_ids.at(i + 1));
   }
 
-  // Downsample if we are downsampling
+  // Blur and downsample if we are doing either
   ov_core::CameraData message = message_const;
-  for (size_t i = 0; i < message.sensor_ids.size() && params.downsample_cameras;
-       i++) {
-    cv::Mat img = message.images.at(i);
-    cv::Mat mask = message.masks.at(i);
+  bool preprocess =
+      params.gaussian_blur_cameras || params.downsample_scale != 1.0;
+  for (size_t i = 0; i < message.sensor_ids.size() && preprocess; i++) {
     cv::Mat img_temp, mask_temp;
-    cv::pyrDown(img, img_temp, cv::Size(img.cols / 2.0, img.rows / 2.0));
+    preprocess_camera_image(message.images.at(i), message.masks.at(i),
+                            params.gaussian_blur_cameras,
+                            params.downsample_scale, img_temp, mask_temp);
     message.images.at(i) = img_temp;
-    cv::pyrDown(mask, mask_temp, cv::Size(mask.cols / 2.0, mask.rows / 2.0));
     message.masks.at(i) = mask_temp;
   }
 

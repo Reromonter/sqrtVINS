@@ -104,6 +104,7 @@ list(APPEND LIBRARY_SOURCES
         
         src/utils/Timer.cpp
         src/utils/Helper.cpp
+        src/utils/ImagePreprocess.cpp
         src/utils/NoiseManager.cpp
         src/utils/CameraPoseBuffer.cpp
         src/utils/EigenMatrixBuffer.cpp

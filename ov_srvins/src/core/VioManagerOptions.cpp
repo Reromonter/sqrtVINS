@@ -40,6 +40,7 @@
 
 #include "state/StateOptions.h"
 #include "update/UpdaterOptions.h"
+#include "utils/ImagePreprocess.h"
 #include "utils/NoiseManager.h"
 
 #include "initializer/InertialInitializerOptions.h"
@@ -178,6 +179,18 @@ void VioManagerOptions::print_and_load_state(
                          state_options.num_cameras); // might be redundant
     parser->parse_config("downsample_cameras",
                          downsample_cameras); // might be redundant
+    parser->parse_config("downsample_scale", downsample_scale, false);
+    if (!resolve_downsample_scale(downsample_cameras, downsample_scale,
+                                  downsample_scale)) {
+      PRINT_ERROR(RED "VioManager(): invalid camera downsampling "
+                      "(downsample_cameras: %d, "
+                      "downsample_scale: %.3f):\n" RESET,
+                  downsample_cameras, downsample_scale);
+      PRINT_ERROR(RED "\t- downsample_scale must be in (0, 1]\n" RESET);
+      PRINT_ERROR(RED "\t- downsample_cameras: true means downsample_scale: "
+                      "0.5, only set one of them\n" RESET);
+      std::exit(EXIT_FAILURE);
+    }
     for (int i = 0; i < state_options.num_cameras; i++) {
 
       // Time offset (use the first one)
@@ -207,18 +220,21 @@ void VioManagerOptions::print_and_load_state(
       cam_calib << cam_calib1.at(0), cam_calib1.at(1), cam_calib1.at(2),
           cam_calib1.at(3), cam_calib2.at(0), cam_calib2.at(1),
           cam_calib2.at(2), cam_calib2.at(3);
-      cam_calib(0) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(1) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(2) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(3) /= (downsample_cameras) ? 2.0 : 1.0;
 
       // FOV / resolution
       std::vector<int> matrix_wh = {1, 1};
       parser->parse_external("relative_config_imucam",
                              "cam" + std::to_string(i), "resolution",
                              matrix_wh);
-      matrix_wh.at(0) /= (downsample_cameras) ? 2.0 : 1.0;
-      matrix_wh.at(1) /= (downsample_cameras) ? 2.0 : 1.0;
+
+      // Bring the calibration to the resolution we will track at
+      if (downsample_scale != 1.0) {
+        scale_camera_intrinsics(cam_calib, matrix_wh.at(0), matrix_wh.at(1),
+                                downsample_scale);
+        cv::Size scaled = scaled_image_size(matrix_wh.at(0), matrix_wh.at(1),
+                                            downsample_scale);
+        matrix_wh = {scaled.width, scaled.height};
+      }
       std::pair<int, int> wh(matrix_wh.at(0), matrix_wh.at(1));
 
       // Extrinsics
@@ -317,6 +333,8 @@ void VioManagerOptions::print_and_load_trackers(
     parser->parse_config("use_aruco", use_aruco);
     parser->parse_config("downsize_aruco", downsize_aruco);
     parser->parse_config("downsample_cameras", downsample_cameras);
+    parser->parse_config("gaussian_blur_cameras", gaussian_blur_cameras,
+                         false);
     parser->parse_config("num_opencv_threads", num_opencv_threads);
     parser->parse_config("multi_threading_pubs", use_multi_threading_pubs,
                          false);
@@ -352,6 +370,8 @@ void VioManagerOptions::print_and_load_trackers(
   PRINT_DEBUG("  - use_aruco: %d\n", use_aruco);
   PRINT_DEBUG("  - downsize aruco: %d\n", downsize_aruco);
   PRINT_DEBUG("  - downsize cameras: %d\n", downsample_cameras);
+  PRINT_DEBUG("  - downsample scale: %.3f\n", downsample_scale);
+  PRINT_DEBUG("  - gaussian blur cameras: %d\n", gaussian_blur_cameras);
   PRINT_DEBUG("  - num opencv threads: %d\n", num_opencv_threads);
   PRINT_DEBUG("  - use multi-threading pubs: %d\n", use_multi_threading_pubs);
   PRINT_DEBUG("  - use multi-threading subs: %d\n", use_multi_threading_subs);
