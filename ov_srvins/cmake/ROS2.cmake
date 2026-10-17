@@ -78,6 +78,7 @@ list(APPEND LIBRARY_SOURCES
         
         src/utils/Timer.cpp
         src/utils/Helper.cpp
+        src/utils/ImagePreprocess.cpp
         src/utils/NoiseManager.cpp
         src/utils/CameraPoseBuffer.cpp
         src/utils/EigenMatrixBuffer.cpp
@@ -123,6 +124,12 @@ add_executable(test_sim_repeat src/test_sim_repeat.cpp)
 ament_target_dependencies(test_sim_repeat ${ament_libraries})
 target_link_libraries(test_sim_repeat ov_srvins_lib ${thirdparty_libraries})
 install(TARGETS test_sim_repeat DESTINATION lib/${PROJECT_NAME})
+
+if (BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(test_image_preprocess test/test_image_preprocess.cpp)
+    target_link_libraries(test_image_preprocess ov_srvins_lib ${thirdparty_libraries})
+endif ()
 
 # Install launch and config directories
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch/)

@@ -27,6 +27,7 @@
 
 
 #include "initializer/InertialInitializerOptions.h"
+#include "utils/ImagePreprocess.h"
 
 namespace ov_srvins {
 void InertialInitializerOptions::print_and_load(
@@ -165,6 +166,18 @@ void InertialInitializerOptions::print_and_load_state(
     parser->parse_config("max_cameras", num_cameras); // might be redundant
     parser->parse_config("use_stereo", use_stereo);
     parser->parse_config("downsample_cameras", downsample_cameras);
+    parser->parse_config("downsample_scale", downsample_scale, false);
+    if (!resolve_downsample_scale(downsample_cameras, downsample_scale,
+                                  downsample_scale)) {
+      PRINT_ERROR(RED "[INIT]: invalid camera downsampling "
+                      "(downsample_cameras: %d, "
+                      "downsample_scale: %.3f):\n" RESET,
+                  downsample_cameras, downsample_scale);
+      PRINT_ERROR(RED "\t- downsample_scale must be in (0, 1]\n" RESET);
+      PRINT_ERROR(RED "\t- downsample_cameras: true means downsample_scale: "
+                      "0.5, only set one of them\n" RESET);
+      std::exit(EXIT_FAILURE);
+    }
     parser->parse_config("use_bg_estimator", use_bg_estimator, false);
     parser->parse_config("optimizer_debug", optimizer_debug, false);
     parser->parse_config("eigenvector_debug", eigenvector_debug, false);
@@ -199,18 +212,21 @@ void InertialInitializerOptions::print_and_load_state(
       cam_calib << cam_calib1.at(0), cam_calib1.at(1), cam_calib1.at(2),
           cam_calib1.at(3), cam_calib2.at(0), cam_calib2.at(1),
           cam_calib2.at(2), cam_calib2.at(3);
-      cam_calib(0) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(1) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(2) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(3) /= (downsample_cameras) ? 2.0 : 1.0;
 
       // FOV / resolution
       std::vector<int> matrix_wh = {1, 1};
       parser->parse_external("relative_config_imucam",
                              "cam" + std::to_string(i), "resolution",
                              matrix_wh);
-      matrix_wh.at(0) /= (downsample_cameras) ? 2.0 : 1.0;
-      matrix_wh.at(1) /= (downsample_cameras) ? 2.0 : 1.0;
+
+      // Bring the calibration to the resolution we will track at
+      if (downsample_scale != 1.0) {
+        scale_camera_intrinsics(cam_calib, matrix_wh.at(0), matrix_wh.at(1),
+                                downsample_scale);
+        cv::Size scaled = scaled_image_size(matrix_wh.at(0), matrix_wh.at(1),
+                                            downsample_scale);
+        matrix_wh = {scaled.width, scaled.height};
+      }
 
       // Extrinsics
       Eigen::Matrix4d T_CtoI = Eigen::Matrix4d::Identity();
@@ -243,6 +259,7 @@ void InertialInitializerOptions::print_and_load_state(
   PRINT_DEBUG("  - num_cameras: %d\n", num_cameras);
   PRINT_DEBUG("  - use_stereo: %d\n", use_stereo);
   PRINT_DEBUG("  - downsize cameras: %d\n", downsample_cameras);
+  PRINT_DEBUG("  - downsample scale: %.3f\n", downsample_scale);
   if (num_cameras != (int)camera_intrinsics.size() ||
       num_cameras != (int)camera_extrinsics.size()) {
     PRINT_ERROR(

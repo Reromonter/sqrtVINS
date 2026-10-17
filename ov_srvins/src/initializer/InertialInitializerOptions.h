@@ -181,8 +181,12 @@ struct InertialInitializerOptions {
   bool use_stereo = true;
 
   /// Will half the resolution all tracking image (aruco will be 1/4 instead of
-  /// halved if dowsize_aruoc also enabled)
+  /// halved if dowsize_aruoc also enabled). Legacy for downsample_scale = 0.5.
   bool downsample_cameras = false;
+
+  /// Resolution scale of all tracking images in (0, 1]. Resolved together with
+  /// downsample_cameras when loading.
+  double downsample_scale = 1.0;
 
   /// Time offset between camera and IMU (t_imu = t_cam + t_off)
   double calib_camimu_dt = 0.0;
