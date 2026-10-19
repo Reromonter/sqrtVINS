@@ -51,6 +51,7 @@ void InertialInitializerOptions::print_and_load_initializer(
 
     parser->parse_config("init_dyn_num_pose", init_dyn_num_pose, false);
     parser->parse_config("init_dyn_min_deg", init_dyn_min_deg, false);
+    parser->parse_config("init_dyn_max_bg", init_dyn_max_bg, false);
 
     parser->parse_config("init_window_offset", init_window_offset, false);
 
@@ -121,6 +122,7 @@ void InertialInitializerOptions::print_and_load_initializer(
   PRINT_DEBUG("  - init_dyn_mle_max_iter: %d\n", init_dyn_mle_max_iter);
   PRINT_DEBUG("  - init_dyn_num_pose: %d\n", init_dyn_num_pose);
   PRINT_DEBUG("  - init_dyn_min_deg: %.2f\n", init_dyn_min_deg);
+  PRINT_DEBUG("  - init_dyn_max_bg: %.4f\n", init_dyn_max_bg);
   // if (init_dyn_num_pose < 4) {
   //   PRINT_ERROR(RED "number of requested frames to init not enough!!\n"
   //   RESET); PRINT_ERROR(RED "  init_dyn_num_pose = %d (4 min)\n" RESET,
