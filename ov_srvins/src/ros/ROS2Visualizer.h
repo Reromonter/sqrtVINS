@@ -30,6 +30,7 @@
 #ifndef OV_SRVINS_ROS2VISUALIZER_H
 #define OV_SRVINS_ROS2VISUALIZER_H
 
+#include <chrono>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
@@ -241,6 +242,9 @@ protected:
   // callback_inertial() is unaffected. 0 (default) publishes on every sample.
   double odom_publish_rate_hz = 0.0;
   double last_odom_pub_timestamp = -1.0;
+  // Wall time the last fast propagation for odomimu finished; gates a burst
+  // of queued IMU (after a stall) that the message stamps alone would not
+  std::chrono::steady_clock::time_point last_odom_prop_wall;
 
   // Files and if we should save total state
   bool save_total_state = false;
