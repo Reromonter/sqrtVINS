@@ -129,6 +129,8 @@ if (BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
     ament_add_gtest(test_image_preprocess test/test_image_preprocess.cpp)
     target_link_libraries(test_image_preprocess ov_srvins_lib ${thirdparty_libraries})
+    ament_add_gtest(test_sun_sensor_update test/test_sun_sensor_update.cpp)
+    target_link_libraries(test_sun_sensor_update ov_srvins_lib ${thirdparty_libraries})
 endif ()
 
 # Install launch and config directories

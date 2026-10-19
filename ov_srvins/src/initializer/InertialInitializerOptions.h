@@ -82,6 +82,11 @@ struct InertialInitializerOptions {
   /// Minimum degrees we need to rotate before we try to init (sum of norm)
   double init_dyn_min_deg = 45.0;
 
+  /// Max distance (rad/s) of the solved gyroscope bias from init_dyn_bias_g
+  /// before the dynamic init is rejected and retried on the next window
+  /// (<= 0 disables the check)
+  double init_dyn_max_bg = -1.0;
+
   /// Minimum reciprocal condition number acceptable for our covariance recovery
   /// (min_sigma / max_sigma < sqrt(min_reciprocal_condition_number))
   double init_dyn_min_rec_cond = 1e-15;

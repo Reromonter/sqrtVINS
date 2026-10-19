@@ -197,6 +197,23 @@ VioManager::VioManager(VioManagerOptions &params_)
         R_ItoS, params.sun_min_elevation_deg * M_PI / 180.0,
         params.sun_min_gravity_angle_deg * M_PI / 180.0,
         params.sun_init_align_from_first_reading);
+    updaterSun->set_time_align(
+        params.sun_time_align,
+        [this](double t0, double t1, Vec3 &w_mean) {
+          return propagator->mean_gyro(t0, t1, w_mean);
+        });
+    updaterSun->set_robust(params.sun_robust,
+                           params.sun_max_residual_deg * M_PI / 180.0);
+    updaterSun->set_recovery(params.sun_recover_after_s);
+    // INFO, not DEBUG: an image without these keys ignores them silently, so
+    // this line is how a run log proves which update it actually ran
+    PRINT_INFO("[SUN]: update mode: sigma %.5f / %.5f rad, chi2 x%.1f, "
+               "time_align %d, robust %d (max residual %.1f deg), recover "
+               "after %.1f s\n",
+               params.sun_sigma_alpha, params.sun_sigma_beta,
+               params.sun_options.chi2_multipler, params.sun_time_align,
+               params.sun_robust, params.sun_max_residual_deg,
+               params.sun_recover_after_s);
 
     // The yaw from G to the ephemeris frame
     VecX temp_sun_align_yaw;

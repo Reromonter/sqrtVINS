@@ -119,6 +119,20 @@ public:
                                                           [](auto *) {});
   }
 
+  /**
+   * @brief Mean raw gyroscope reading over [t0, t1] (IMU clock)
+   *
+   * Takes the IMU buffer lock, so it is safe to call from the update thread
+   * while readings arrive. An interval shorter than the IMU period still gets
+   * the reading closest to its middle.
+   *
+   * @param t0 Start of the interval (IMU clock)
+   * @param t1 End of the interval (IMU clock), t1 >= t0
+   * @param w_mean Mean angular velocity (rad/s, IMU frame, bias not removed)
+   * @return False if the buffer does not reach both ends of the interval
+   */
+  bool mean_gyro(double t0, double t1, Vec3 &w_mean);
+
 protected:
   /**
    * @brief Propagates the state forward using the imu data and computes the

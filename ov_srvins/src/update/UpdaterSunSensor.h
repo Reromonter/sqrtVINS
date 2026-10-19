@@ -27,6 +27,8 @@
 #ifndef OV_SRVINS_UPDATER_SUNSENSOR_H
 #define OV_SRVINS_UPDATER_SUNSENSOR_H
 
+#include <cmath>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -66,6 +68,52 @@ public:
                    DataType sigma_beta, const Mat3 &R_ItoS,
                    DataType min_elevation_rad, DataType min_gravity_angle_rad,
                    bool init_align_from_first_reading = true);
+
+  /// Mean raw gyro reading over [t0, t1] (IMU clock); false if not covered
+  using GyroSource = std::function<bool(double, double, Vec3 &)>;
+
+  /**
+   * @brief Pair readings with the state on the IMU clock and rotate the
+   * chosen reading to the state time with the gyro.
+   *
+   * Off, a reading is paired with the camera-clock state time and used as is,
+   * which at 40 Hz leaves up to half a period (plus the camera-IMU offset)
+   * between the attitude the reading saw and the one it is compared with:
+   * ~0.1-0.3 deg while turning, several times the sensor noise.
+   */
+  void set_time_align(bool enable, GyroSource gyro) {
+    time_align_ = enable;
+    gyro_ = std::move(gyro);
+  }
+
+  /**
+   * @brief Down-weight readings that fail the chi2 gate instead of dropping
+   * them, up to a hard limit.
+   *
+   * A failing reading gets its noise inflated until it sits on the gate, so
+   * it still pulls the state, by a bounded amount. Only a residual above
+   * @p max_residual_rad (either angle) is rejected outright.
+   */
+  void set_robust(bool enable, DataType max_residual_rad) {
+    robust_ = enable;
+    max_residual_rad_ = max_residual_rad;
+  }
+
+  /**
+   * @brief Re-acquire after a run of inconsistent readings.
+   *
+   * VIO is overconfident about its global yaw: once the heading has drifted
+   * past the gate, its yaw covariance never grows enough to admit a reading
+   * again and the sun stays locked out for good. When every reading for
+   * @p after_s seconds failed the gate (rejected or down-weighted), the global
+   * yaw of the whole trajectory is inflated so the next reading can correct
+   * it. Zero disables this.
+   */
+  void set_recovery(DataType after_s) { recover_after_s_ = after_s; }
+
+  /// Residual (measured - predicted angles, rad) of the last reading that
+  /// reached the gate, accepted or not
+  Vec2 last_residual() const { return last_residual_; }
 
   /**
    * @brief Feed function for sun sensor data
@@ -138,6 +186,24 @@ protected:
   /// Last rejection reason we printed, so a permanently bad geometry says so
   /// once instead of once per reading
   std::string last_reject_reason_;
+
+  /// See set_time_align / set_robust / set_recovery
+  bool time_align_ = false;
+  GyroSource gyro_;
+  bool robust_ = false;
+  DataType max_residual_rad_ = 5.0 * M_PI / 180.0;
+  DataType recover_after_s_ = 0.0;
+  Vec2 last_residual_ = Vec2::Zero();
+
+  /// State time of the first reading of the current run of readings that
+  /// failed the gate (-1: the last reading passed)
+  double inconsistent_since_ = -1;
+
+  /// Periodic statistics, printed every kStatsPeriod of state time
+  void count_and_report(double timestamp, int *counter);
+  double stats_since_ = -1;
+  int n_accepted_ = 0, n_downweighted_ = 0, n_rejected_ = 0, n_no_reading_ = 0,
+      n_recoveries_ = 0;
 };
 
 } // namespace ov_srvins

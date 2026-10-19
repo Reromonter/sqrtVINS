@@ -193,8 +193,12 @@ void ROS2Visualizer::setup_subscribers(
   _node->declare_parameter<std::string>("topic_imu", "/imu0");
   _node->get_parameter("topic_imu", topic_imu);
   parser->parse_external("relative_config_imu", "imu0", "rostopic", topic_imu);
+  // Keep 5 s of 400 Hz IMU (SensorDataQoS keeps 5 samples): when the callbacks
+  // are blocked for a moment (e.g. the camera callback waiting on a long
+  // update), the IMU is delivered late instead of lost, so the filter never
+  // propagates across a hole
   sub_imu = _node->create_subscription<sensor_msgs::msg::Imu>(
-      topic_imu, rclcpp::SensorDataQoS(),
+      topic_imu, rclcpp::SensorDataQoS().keep_last(2000),
       std::bind(&ROS2Visualizer::callback_inertial, this,
                 std::placeholders::_1));
   PRINT_INFO("subscribing to IMU: %s\n", topic_imu.c_str());
@@ -336,10 +340,17 @@ void ROS2Visualizer::visualize_odometry(double timestamp) {
   // Decimate the odomimu publish (pose/twist message + TF) independent of the
   // IMU sample rate. State propagation already happened in feed_measurement_imu()
   // before this was called, so estimator accuracy is unaffected.
+  // The fast propagation integrates every IMU sample since the last update, so
+  // a burst of IMU queued during a stall would cost O(n^2): also skip samples
+  // that arrive within half a period of the previous propagation finishing.
   if (odom_publish_rate_hz > 0.0) {
     double min_dt = 1.0 / odom_publish_rate_hz;
+    double wall_dt = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now() - last_odom_prop_wall)
+                         .count();
     if (last_odom_pub_timestamp > 0.0 &&
-        (timestamp - last_odom_pub_timestamp) < min_dt)
+        ((timestamp - last_odom_pub_timestamp) < min_dt ||
+         wall_dt < 0.5 * min_dt))
       return;
     last_odom_pub_timestamp = timestamp;
   }
@@ -350,8 +361,10 @@ void ROS2Visualizer::visualize_odometry(double timestamp) {
       Eigen::Matrix<DataType, 13, 1>::Zero();
   Eigen::Matrix<DataType, 12, 12> cov_plus =
       Eigen::Matrix<DataType, 12, 12>::Zero();
-  if (!_app->get_propagator()->fast_state_propagate(state, timestamp,
-                                                    state_plus, cov_plus))
+  bool propagated = _app->get_propagator()->fast_state_propagate(
+      state, timestamp, state_plus, cov_plus);
+  last_odom_prop_wall = std::chrono::steady_clock::now();
+  if (!propagated)
     return;
 
   // Publish our odometry message if requested
