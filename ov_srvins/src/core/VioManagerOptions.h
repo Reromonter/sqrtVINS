@@ -193,6 +193,19 @@ struct VioManagerOptions {
   /// initialized that way - otherwise let calib_sun_align estimate it.
   DataType sun_align_yaw_deg = 0.0;
 
+  /// Pair sun readings with the state on the IMU clock and rotate the reading
+  /// to the state time with the gyro (UpdaterSunSensor::set_time_align)
+  bool sun_time_align = false;
+
+  /// Down-weight readings that fail the chi2 gate instead of dropping them;
+  /// only a residual above sun_max_residual_deg is rejected outright
+  bool sun_robust = false;
+  DataType sun_max_residual_deg = 5.0;
+
+  /// Inflate the global yaw after this long with every reading failing the
+  /// gate, to escape the lock-out (s, 0 = never)
+  DataType sun_recover_after_s = 0.0;
+
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 

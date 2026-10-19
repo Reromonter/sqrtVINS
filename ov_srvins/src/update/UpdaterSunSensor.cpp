@@ -53,6 +53,13 @@ constexpr double kMaxSunDt = 0.1;
 /// Hard cap on how much history the buffer keeps
 constexpr double kMaxBufferAge = 5.0;
 
+/// State time between two "[SUN]: last N s" statistics lines
+constexpr double kStatsPeriod = 10.0;
+
+/// Bounds on the global yaw sigma a re-acquisition adds (rad)
+constexpr double kMinRecoverSigma = 0.5 * M_PI / 180.0;
+constexpr double kMaxRecoverSigma = 30.0 * M_PI / 180.0;
+
 /// Sun direction in the sensor frame -> the two sensor angles.
 Vec2 unit_vector_to_angles(const Vec3 &s) {
   return Vec2(std::atan2(s(0), s(2)), std::atan2(s(1), s(2)));
@@ -140,6 +147,23 @@ void UpdaterSunSensor::clean_old_sun_measurements(double oldest_time) {
   }
 }
 
+void UpdaterSunSensor::count_and_report(double timestamp, int *counter) {
+  (*counter)++;
+  if (stats_since_ < 0) {
+    stats_since_ = timestamp;
+    return;
+  }
+  if (timestamp - stats_since_ < kStatsPeriod)
+    return;
+  PRINT_INFO("[SUN]: last %.1f s: %d accepted, %d down-weighted, %d rejected, "
+             "%d without a reading, %d re-acquisitions\n",
+             timestamp - stats_since_, n_accepted_, n_downweighted_,
+             n_rejected_, n_no_reading_, n_recoveries_);
+  stats_since_ = timestamp;
+  n_accepted_ = n_downweighted_ = n_rejected_ = n_no_reading_ =
+      n_recoveries_ = 0;
+}
+
 bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
                                   double timestamp, DataType sun_azimuth_rad,
                                   DataType sun_elevation_rad) {
@@ -182,6 +206,11 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   //=========================================================================
   // Pick the reading closest to the state time
   //=========================================================================
+  // The readings are stamped on the IMU clock; the state time is the camera
+  // clock, which the IMU state leads by the camera-IMU time offset.
+  const double t_ref =
+      time_align_ ? timestamp + state->calib_dt_CAMtoIMU->value()(0)
+                  : timestamp;
   ov_core::SunSensorData best;
   bool have_best = false;
   {
@@ -190,7 +219,7 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
     for (const auto &meas : sun_data_) {
       if (meas.timestamp <= last_used_timestamp_)
         continue;
-      const double dt = std::abs(meas.timestamp - timestamp);
+      const double dt = std::abs(meas.timestamp - t_ref);
       if (dt <= best_dt) {
         best_dt = dt;
         best = meas;
@@ -198,8 +227,28 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
       }
     }
   }
-  if (!have_best)
+  if (!have_best) {
+    count_and_report(timestamp, &n_no_reading_);
     return false;
+  }
+
+  // Carry the reading from its own time to the state time with the gyro:
+  // R_GtoI(t_ref) = exp(-[w dt]x) R_GtoI(t_s), so a fixed world direction
+  // seen in the IMU frame turns by the same rotation.
+  if (time_align_ && gyro_ && best.timestamp != t_ref) {
+    Vec3 w_mean;
+    if (gyro_(std::min(best.timestamp, t_ref), std::max(best.timestamp, t_ref),
+              w_mean)) {
+      const Vec3 w_hat = w_mean - state->imu->bias_g();
+      const Mat3 dR =
+          ov_core::exp_so3(Vec3(-w_hat * (DataType)(t_ref - best.timestamp)));
+      const Vec3 s_S = R_ItoS_ * dR * R_ItoS_.transpose() *
+                       angles_to_unit_vector(best.alpha, best.beta);
+      const Vec2 aligned = unit_vector_to_angles(s_S);
+      best.alpha = aligned(0);
+      best.beta = aligned(1);
+    }
+  }
 
   // Ephemeris direction in the gravity-aligned reference frame (ENU: x east,
   // y north, z up), with azimuth measured clockwise from true north.
@@ -266,6 +315,7 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   Vec2 res;
   res(0) = wrap_pi(best.alpha - angles_pred(0));
   res(1) = wrap_pi(best.beta - angles_pred(1));
+  last_residual_ = res;
 
   //=========================================================================
   // Jacobians, at the first estimates
@@ -327,29 +377,67 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   const DataType chi2 = res.dot(S.llt().solve(res));
   const DataType chi2_check =
       options_.chi2_multipler * chi_squared_table_[(int)res.rows()];
+
+  // How much the noise is inflated for this reading (1 = as configured)
+  DataType noise_scale = 1.0;
   if (chi2 > chi2_check) {
-    PRINT_DEBUG(YELLOW "[SUN]: rejected reading at %.6f (chi2 %.3f > %.3f, "
-                       "res %.3f / %.3f deg)\n" RESET,
-                best.timestamp, chi2, chi2_check, res(0) * 180.0 / M_PI,
-                res(1) * 180.0 / M_PI);
-    
-    const std::string reason = "chi2";
-    if (last_reject_reason_ != reason) {
-      last_reject_reason_ = reason;
-      PRINT_INFO(YELLOW "[SUN]: readings are failing the chi2 gate (%.3f > "
-                        "%.3f, res %.3f / %.3f deg) - the measurement and the "
-                        "configured ephemeris disagree by more than the noise "
-                        "allows; suppressing until one is accepted\n" RESET,
-                 chi2, chi2_check, res(0) * 180.0 / M_PI,
-                 res(1) * 180.0 / M_PI);
-    }
+    const bool too_large =
+        std::max(std::abs(res(0)), std::abs(res(1))) > max_residual_rad_;
     last_used_timestamp_ = best.timestamp;
-    return false;
+
+    // A run of readings that all disagree with the state is the lock-out
+    // signature: re-acquire by inflating the global yaw, then let the next
+    // reading through the gate on its own merits.
+    if (inconsistent_since_ < 0)
+      inconsistent_since_ = timestamp;
+    if (recover_after_s_ > 0 &&
+        timestamp - inconsistent_since_ >= recover_after_s_) {
+      const DataType sigma = std::min(
+          (DataType)kMaxRecoverSigma,
+          std::max((DataType)kMinRecoverSigma, (DataType)(2.0 * res.norm())));
+      StateHelper::inflate_global_yaw(state, sigma);
+      PRINT_INFO(YELLOW "[SUN]: every reading for %.1f s failed the gate "
+                        "(now res %.3f / %.3f deg) - re-acquiring with %.2f "
+                        "deg of added global yaw uncertainty\n" RESET,
+                 timestamp - inconsistent_since_, res(0) * 180.0 / M_PI,
+                 res(1) * 180.0 / M_PI, sigma * 180.0 / M_PI);
+      inconsistent_since_ = -1;
+      count_and_report(timestamp, &n_recoveries_);
+      return false;
+    }
+
+    if (!robust_ || too_large) {
+      PRINT_DEBUG(YELLOW "[SUN]: rejected reading at %.6f (chi2 %.3f > %.3f, "
+                         "res %.3f / %.3f deg)\n" RESET,
+                  best.timestamp, chi2, chi2_check, res(0) * 180.0 / M_PI,
+                  res(1) * 180.0 / M_PI);
+
+      const std::string reason = "chi2";
+      if (last_reject_reason_ != reason) {
+        last_reject_reason_ = reason;
+        PRINT_INFO(YELLOW "[SUN]: readings are failing the chi2 gate (%.3f > "
+                          "%.3f, res %.3f / %.3f deg) - the measurement and the "
+                          "configured ephemeris disagree by more than the noise "
+                          "allows; suppressing until one is accepted\n" RESET,
+                   chi2, chi2_check, res(0) * 180.0 / M_PI,
+                   res(1) * 180.0 / M_PI);
+      }
+      count_and_report(timestamp, &n_rejected_);
+      return false;
+    }
+
+    // Robust: inflate the noise until the reading sits on the gate. With the
+    // state's own uncertainty in S this lands a little inside it, so the pull
+    // is bounded by what a reading at the gate would do.
+    noise_scale = chi2 / chi2_check;
+  } else {
+    inconsistent_since_ = -1;
   }
 
   // Scatter H^T * R^-1 * res into a full-state vector, by variable id
   VecX RHTr = VecX::Zero(state->get_state_size());
-  const Vec2 R_inv_res(res(0) / sigma_alpha_sq, res(1) / sigma_beta_sq);
+  const Vec2 R_inv_res(res(0) / (sigma_alpha_sq * noise_scale),
+                       res(1) / (sigma_beta_sq * noise_scale));
   int local_id = 0;
   for (const auto &var : Hx_order) {
     RHTr.middleRows(var->id(), var->size()).noalias() +=
@@ -358,8 +446,8 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   }
 
   // Whiten: R^(-1/2) * H * U^T, one scale per measurement row
-  HUT.row(0) /= sigma_alpha_;
-  HUT.row(1) /= sigma_beta_;
+  HUT.row(0) /= sigma_alpha_ * std::sqrt(noise_scale);
+  HUT.row(1) /= sigma_beta_ * std::sqrt(noise_scale);
 
   // Sun readings arrive on their own schedule rather than with the camera, so
   // this update stands on its own instead of joining the per-frame batch.
@@ -370,10 +458,21 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
 
   last_used_timestamp_ = best.timestamp;
   last_reject_reason_.clear();
-  PRINT_INFO(CYAN "[SUN]: accepted reading at %.6f (chi2 %.3f < %.3f, res "
-                  "%.3f / %.3f deg, psi_align %.3f deg)\n" RESET,
-             best.timestamp, chi2, chi2_check, res(0) * 180.0 / M_PI,
-             res(1) * 180.0 / M_PI,
-             state->calib_sun_align_yaw->value()(0) * 180.0 / M_PI);
+  if (noise_scale > 1.0) {
+    PRINT_INFO(CYAN "[SUN]: down-weighted reading at %.6f (chi2 %.3f > %.3f, "
+                    "noise x%.2f, res %.3f / %.3f deg, psi_align %.3f deg)\n"
+                    RESET,
+               best.timestamp, chi2, chi2_check, std::sqrt(noise_scale),
+               res(0) * 180.0 / M_PI, res(1) * 180.0 / M_PI,
+               state->calib_sun_align_yaw->value()(0) * 180.0 / M_PI);
+    count_and_report(timestamp, &n_downweighted_);
+  } else {
+    PRINT_INFO(CYAN "[SUN]: accepted reading at %.6f (chi2 %.3f < %.3f, res "
+                    "%.3f / %.3f deg, psi_align %.3f deg)\n" RESET,
+               best.timestamp, chi2, chi2_check, res(0) * 180.0 / M_PI,
+               res(1) * 180.0 / M_PI,
+               state->calib_sun_align_yaw->value()(0) * 180.0 / M_PI);
+    count_and_report(timestamp, &n_accepted_);
+  }
   return true;
 }
