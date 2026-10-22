@@ -344,6 +344,13 @@ void VioManagerOptions::print_and_load_trackers(
     parser->parse_config("downsample_cameras", downsample_cameras);
     parser->parse_config("gaussian_blur_cameras", gaussian_blur_cameras,
                          false);
+    parser->parse_config("gaussian_blur_ksize", gaussian_blur_ksize, false);
+    if (!valid_gaussian_blur_ksize(gaussian_blur_ksize)) {
+      PRINT_ERROR(RED "VioManager(): invalid gaussian_blur_ksize %d, it must be "
+                      "odd and at least 3\n" RESET,
+                  gaussian_blur_ksize);
+      std::exit(EXIT_FAILURE);
+    }
     parser->parse_config("num_opencv_threads", num_opencv_threads);
     parser->parse_config("multi_threading_pubs", use_multi_threading_pubs,
                          false);
@@ -381,6 +388,7 @@ void VioManagerOptions::print_and_load_trackers(
   PRINT_DEBUG("  - downsize cameras: %d\n", downsample_cameras);
   PRINT_DEBUG("  - downsample scale: %.3f\n", downsample_scale);
   PRINT_DEBUG("  - gaussian blur cameras: %d\n", gaussian_blur_cameras);
+  PRINT_DEBUG("  - gaussian blur ksize: %d\n", gaussian_blur_ksize);
   PRINT_DEBUG("  - num opencv threads: %d\n", num_opencv_threads);
   PRINT_DEBUG("  - use multi-threading pubs: %d\n", use_multi_threading_pubs);
   PRINT_DEBUG("  - use multi-threading subs: %d\n", use_multi_threading_subs);

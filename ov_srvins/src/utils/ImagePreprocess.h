@@ -32,9 +32,22 @@
 
 namespace ov_srvins {
 
-/// Kernel size of the optional gaussian blur. With sigma 0 OpenCV uses the
-/// fixed 5-tap binomial kernel [1 4 6 4 1] / 16, the same one cv::pyrDown uses.
+/// Default kernel size of the optional gaussian blur. With sigma 0 OpenCV uses
+/// the fixed 5-tap binomial kernel [1 4 6 4 1] / 16, the same one cv::pyrDown
+/// uses.
 constexpr int GAUSSIAN_BLUR_KSIZE = 5;
+
+/**
+ * @brief If a kernel size can be used for the gaussian blur
+ *
+ * cv::GaussianBlur needs an odd size, and 1 would not blur at all. Sigma is
+ * left to OpenCV (0.3 * ((ksize - 1) * 0.5 - 1) + 0.8), so the size alone sets
+ * how strong the blur is.
+ *
+ * @param ksize Kernel size in pixels, the same along both axes
+ * @return True if the size is odd and at least 3
+ */
+bool valid_gaussian_blur_ksize(int ksize);
 
 /**
  * @brief Resolve the resolution scale of the tracking images.
@@ -91,10 +104,12 @@ void scale_camera_intrinsics(VecX &cam_calib, int width, int height,
  * @param scale Resolution scale in (0, 1]
  * @param img_out Preprocessed image
  * @param mask_out Mask at the resolution of img_out
+ * @param blur_ksize Kernel size of the gaussian, see valid_gaussian_blur_ksize
  */
 void preprocess_camera_image(const cv::Mat &img, const cv::Mat &mask,
                              bool gaussian_blur, double scale,
-                             cv::Mat &img_out, cv::Mat &mask_out);
+                             cv::Mat &img_out, cv::Mat &mask_out,
+                             int blur_ksize = GAUSSIAN_BLUR_KSIZE);
 
 } // namespace ov_srvins
 

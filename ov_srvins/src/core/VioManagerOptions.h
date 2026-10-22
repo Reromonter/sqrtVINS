@@ -277,9 +277,12 @@ struct VioManagerOptions {
   /// into 480x300. Resolved together with downsample_cameras when loading.
   double downsample_scale = 1.0;
 
-  /// Will blur all tracking images with a 5x5 gaussian (the kernel of
-  /// cv::pyrDown) before they are downsampled
+  /// Will blur all tracking images with a gaussian before they are downsampled
   bool gaussian_blur_cameras = false;
+
+  /// Kernel size of that gaussian, odd and >= 3. OpenCV derives sigma from it,
+  /// and 5 is the kernel of cv::pyrDown
+  int gaussian_blur_ksize = 5;
 
   /// Threads our front-end should try to use (opencv uses this also)
   int num_opencv_threads = 4;

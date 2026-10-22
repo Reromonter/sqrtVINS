@@ -279,7 +279,8 @@ void VioManager::track_image_and_update(
     cv::Mat img_temp, mask_temp;
     preprocess_camera_image(message.images.at(i), message.masks.at(i),
                             params.gaussian_blur_cameras,
-                            params.downsample_scale, img_temp, mask_temp);
+                            params.downsample_scale, img_temp, mask_temp,
+                            params.gaussian_blur_ksize);
     message.images.at(i) = img_temp;
     message.masks.at(i) = mask_temp;
   }

@@ -47,6 +47,10 @@ bool resolve_downsample_scale(bool downsample_cameras, double downsample_scale,
   return true;
 }
 
+bool valid_gaussian_blur_ksize(int ksize) {
+  return ksize >= 3 && ksize % 2 == 1;
+}
+
 cv::Size scaled_image_size(int width, int height, double scale) {
   return cv::Size(std::max(1, (int)std::lround(width * scale)),
                   std::max(1, (int)std::lround(height * scale)));
@@ -65,12 +69,12 @@ void scale_camera_intrinsics(VecX &cam_calib, int width, int height,
 
 void preprocess_camera_image(const cv::Mat &img, const cv::Mat &mask,
                              bool gaussian_blur, double scale,
-                             cv::Mat &img_out, cv::Mat &mask_out) {
+                             cv::Mat &img_out, cv::Mat &mask_out,
+                             int blur_ksize) {
   // NOTE: img_blur must not alias img before the blur, else it blurs in place
   cv::Mat img_blur;
   if (gaussian_blur) {
-    cv::GaussianBlur(img, img_blur,
-                     cv::Size(GAUSSIAN_BLUR_KSIZE, GAUSSIAN_BLUR_KSIZE), 0);
+    cv::GaussianBlur(img, img_blur, cv::Size(blur_ksize, blur_ksize), 0);
   } else {
     img_blur = img;
   }

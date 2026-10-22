@@ -162,6 +162,48 @@ TEST(PreprocessCameraImage, BlurIsThePyrDownKernel) {
   EXPECT_LE(cv::norm(img_even, img_pyr, cv::NORM_INF), 1.0);
 }
 
+TEST(PreprocessCameraImage, BlurKsizeValidation) {
+  EXPECT_TRUE(valid_gaussian_blur_ksize(3));
+  EXPECT_TRUE(valid_gaussian_blur_ksize(GAUSSIAN_BLUR_KSIZE));
+  EXPECT_TRUE(valid_gaussian_blur_ksize(11));
+  EXPECT_FALSE(valid_gaussian_blur_ksize(1));
+  EXPECT_FALSE(valid_gaussian_blur_ksize(4));
+  EXPECT_FALSE(valid_gaussian_blur_ksize(0));
+  EXPECT_FALSE(valid_gaussian_blur_ksize(-3));
+}
+
+TEST(PreprocessCameraImage, BlurKsizeIsUsed) {
+  cv::Mat img = noise_image(64, 40);
+  cv::Mat mask_out, img_default, img_expected;
+  preprocess_camera_image(img, cv::Mat(), true, 1.0, img_default, mask_out);
+  for (int ksize : {3, 5, 7, 9, 11}) {
+    cv::Mat img_out;
+    preprocess_camera_image(img, cv::Mat(), true, 1.0, img_out, mask_out,
+                            ksize);
+    cv::GaussianBlur(img, img_expected, cv::Size(ksize, ksize), 0);
+    EXPECT_EQ(cv::norm(img_out, img_expected, cv::NORM_INF), 0.0)
+        << "ksize " << ksize;
+    if (ksize == GAUSSIAN_BLUR_KSIZE) {
+      EXPECT_EQ(cv::norm(img_out, img_default, cv::NORM_INF), 0.0);
+    }
+  }
+}
+
+TEST(PreprocessCameraImage, LargerKsizeBlursMore) {
+  // Blurred white noise keeps less variance the wider the kernel
+  cv::Mat img = noise_image(256, 160);
+  double last = std::numeric_limits<double>::infinity();
+  for (int ksize : {3, 5, 7, 9, 11}) {
+    cv::Mat img_out, mask_out;
+    preprocess_camera_image(img, cv::Mat(), true, 0.5, img_out, mask_out,
+                            ksize);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(img_out, mean, stddev);
+    EXPECT_LT(stddev[0], last) << "ksize " << ksize;
+    last = stddev[0];
+  }
+}
+
 TEST(PreprocessCameraImage, DownsampleWithoutBlurDiffersFromPyrDown) {
   cv::Mat img = noise_image(64, 40);
   cv::Mat img_out, mask_out, img_pyr;
