@@ -221,8 +221,9 @@ struct VioManagerOptions {
   std::vector<double> leg_R_BtoI = {1, 0, 0, 0, 1, 0, 0, 0, 1};
   std::vector<double> leg_p_BinI = {0, 0, 0};
 
-  /// Noise of one leg's window velocity (m/s, 1-sigma per axis)
-  DataType leg_sigma_v = 0.2;
+  /// Noise of one leg's window velocity (m/s, 1-sigma per axis); 0.1 needs
+  /// leg_recover_after_s > 0 (see UpdaterLegVelocity::Params::sigma_v)
+  DataType leg_sigma_v = 0.1;
 
   /// Half width of the joint-sample averaging window (s)
   double leg_half_window_s = 0.1;

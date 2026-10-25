@@ -77,9 +77,10 @@ public:
     Mat3 R_BtoI = Mat3::Identity();
     Vec3 p_BinI = Vec3::Zero();
     /// Noise of one leg's velocity over the window (m/s, 1-sigma per axis).
-    /// On BWL 0.1 was overconfident: the gate locked the legs out at the
-    /// first visual break; 0.2 kept them in through all of bwl-III.
-    DataType sigma_v = 0.2;
+    /// 0.1 was the most accurate on BWL (bwl-II/III ATE 0.4-0.7 m vs 0.9-1.6
+    /// at 0.2), but it relies on the lock-out recovery below: without it the
+    /// gate locked the legs out for good at bwl-III's first visual break.
+    DataType sigma_v = 0.1;
     /// Half width of the averaging window around the state time (s)
     double half_window_s = 0.1;
     /// t_joint = t_imu + time_offset_s
