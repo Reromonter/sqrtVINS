@@ -67,6 +67,8 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterMSCKF.cpp
         src/update/UpdaterSLAM.cpp
         src/update/UpdaterSunSensor.cpp
+        src/update/UpdaterLegVelocity.cpp
+        src/legs/LegKinematics.cpp
         src/update/UpdaterZeroVelocity.cpp
 
         src/initializer/InertialInitializer.cpp
@@ -131,6 +133,10 @@ if (BUILD_TESTING)
     target_link_libraries(test_image_preprocess ov_srvins_lib ${thirdparty_libraries})
     ament_add_gtest(test_sun_sensor_update test/test_sun_sensor_update.cpp)
     target_link_libraries(test_sun_sensor_update ov_srvins_lib ${thirdparty_libraries})
+    ament_add_gtest(test_leg_velocity test/test_leg_velocity.cpp)
+    target_link_libraries(test_leg_velocity ov_srvins_lib ${thirdparty_libraries})
+    target_compile_definitions(test_leg_velocity PRIVATE
+            LEG_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
 endif ()
 
 # Install launch and config directories

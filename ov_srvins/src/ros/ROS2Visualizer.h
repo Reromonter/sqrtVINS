@@ -45,6 +45,7 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <sensor_msgs/msg/point_cloud.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -134,6 +135,9 @@ public:
   /// Callback for the two-axis sun sensor 
   void callback_sun(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
 
+  /// Callback for joint states (leg velocity update)
+  void callback_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg);
+
   /// Callback for monocular cameras information
   void callback_monocular(const sensor_msgs::msg::Image::SharedPtr msg0,
                           int cam_id0);
@@ -184,6 +188,7 @@ protected:
   // Our subscribers and camera synchronizers
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
   rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr sub_sun;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joint_state;
   std::vector<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr>
       subs_cam;
   typedef message_filters::sync_policies::ApproximateTime<

@@ -206,6 +206,46 @@ struct VioManagerOptions {
   /// gate, to escape the lock-out (s, 0 = never)
   DataType sun_recover_after_s = 0.0;
 
+  // LEG VELOCITY ===========================
+
+  /// If we should use the legs' kinematics + joint torques as a velocity
+  /// measurement (UpdaterLegVelocity)
+  bool try_leg_velocity = false;
+
+  /// Mechanism file (exported from the robot's USD asset), relative to the
+  /// config folder
+  std::string leg_mechanism_file = "leg_mechanism.yaml";
+
+  /// Body (leg kinematics) frame in the IMU frame: rotation body -> IMU,
+  /// row-major, and the body origin in the IMU frame (m)
+  std::vector<double> leg_R_BtoI = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+  std::vector<double> leg_p_BinI = {0, 0, 0};
+
+  /// Noise of one leg's window velocity (m/s, 1-sigma per axis); 0.1 needs
+  /// leg_recover_after_s > 0 (see UpdaterLegVelocity::Params::sigma_v)
+  DataType leg_sigma_v = 0.1;
+
+  /// Half width of the joint-sample averaging window (s)
+  double leg_half_window_s = 0.1;
+
+  /// Joint clock minus IMU clock (s)
+  double leg_time_offset_s = 0.0;
+
+  /// Load-share stance thresholds and the stance share of the window
+  double leg_share_on = 0.25;
+  double leg_share_off = 0.15;
+  double leg_min_stance_fraction = 0.8;
+
+  /// Kinematic scale on the leg velocity
+  DataType leg_velocity_scale = 1.0;
+
+  /// Skip the update if the newest joint sample is older than this (s)
+  double leg_max_age_s = 0.5;
+
+  /// Inflate the velocity after this long with every stance leg failing the
+  /// gate (s, 0 = never)
+  double leg_recover_after_s = 1.0;
+
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 
@@ -231,6 +271,9 @@ struct VioManagerOptions {
 
   /// Update options for the sun sensor (chi2 multiplier)
   UpdaterOptions sun_options;
+
+  /// Update options for the leg velocity (chi2 multiplier)
+  UpdaterOptions leg_options;
 
   // STATE DEFAULTS ==========================
 

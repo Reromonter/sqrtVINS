@@ -34,6 +34,7 @@
 #include "utils/print.h"
 #include <Eigen/Eigen>
 #include <opencv2/opencv.hpp>
+#include <string>
 #include <vector>
 
 namespace ov_core {
@@ -85,6 +86,30 @@ struct SunSensorData {
 
   /// Sort function to allow for using of STL containers
   bool operator<(const SunSensorData &other) const {
+    return timestamp < other.timestamp;
+  }
+};
+
+/**
+ * @brief Struct for one joint-state message (e.g. the motors of a legged robot).
+ *
+ * Kept by name, as sensor_msgs/JointState sends it: the consumer maps the
+ * names onto its own joint order.
+ */
+struct JointStateData {
+
+  /// Timestamp of the reading
+  double timestamp;
+
+  /// Joint names, and per joint its position (rad), velocity (rad/s) and
+  /// effort (torque, the driver's units); velocity/effort may be empty
+  std::vector<std::string> names;
+  std::vector<double> position;
+  std::vector<double> velocity;
+  std::vector<double> effort;
+
+  /// Sort function to allow for using of STL containers
+  bool operator<(const JointStateData &other) const {
     return timestamp < other.timestamp;
   }
 };

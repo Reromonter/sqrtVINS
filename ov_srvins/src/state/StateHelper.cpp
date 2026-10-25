@@ -298,6 +298,16 @@ void StateHelper::inflate_global_yaw(std::shared_ptr<State> state,
                   .triangularView<Eigen::Upper>();
 }
 
+void StateHelper::inflate_velocity(std::shared_ptr<State> state,
+                                   DataType sigma) {
+  MatX U_new = MatX::Zero(3 + state->U_.rows(), state->U_.cols());
+  U_new.bottomRows(state->U_.rows()) = state->U_;
+  U_new.block(0, state->imu->v()->id(), 3, 3) = sigma * Mat3::Identity();
+  efficient_QR(U_new);
+  state->U_ = U_new.topLeftCorner(state->U_.cols(), state->U_.cols())
+                  .triangularView<Eigen::Upper>();
+}
+
 void StateHelper::update_llt(std::shared_ptr<State> state, bool is_iterative) {
   // Skip if no update is required
   if (state->R_sqrt_inv_H_UT_.rows() == 0)

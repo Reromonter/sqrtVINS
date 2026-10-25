@@ -158,6 +158,18 @@ public:
                                  DataType sigma_rad);
 
   /**
+   * @brief Add isotropic uncertainty to the current IMU velocity
+   *
+   * Stacks three factor rows on the velocity, i.e. P += sigma^2 I on v_IinG.
+   * Used to re-acquire an absolute velocity reference after the filter
+   * drifted past its gate.
+   *
+   * @param state Pointer to state
+   * @param sigma 1-sigma of the added velocity uncertainty (m/s)
+   */
+  static void inflate_velocity(std::shared_ptr<State> state, DataType sigma);
+
+  /**
    * @brief Perform the SREKF update step using LLT
    * @param state Pointer to state
    * @param is_iterative If true, this is part of an iterative update
