@@ -67,6 +67,8 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterMSCKF.cpp
         src/update/UpdaterSLAM.cpp
         src/update/UpdaterSunSensor.cpp
+        src/update/UpdaterLegVelocity.cpp
+        src/legs/LegKinematics.cpp
         src/update/UpdaterZeroVelocity.cpp
 
         src/initializer/InertialInitializer.cpp

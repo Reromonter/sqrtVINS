@@ -216,6 +216,21 @@ void ROS2Visualizer::setup_subscribers(
     PRINT_INFO("subscribing to SUN SENSOR: %s\n", topic_sun.c_str());
   }
 
+  // Create the joint state subscriber, if the leg velocity update is enabled
+  if (_app->get_params().try_leg_velocity) {
+    std::string topic_joint_states;
+    _node->declare_parameter<std::string>("topic_joint_states",
+                                          "/quadruped/joint_states");
+    _node->get_parameter("topic_joint_states", topic_joint_states);
+    parser->parse_config("topic_joint_states", topic_joint_states, false);
+    // 200 Hz, consumed once per camera frame: keep a few seconds
+    sub_joint_state = _node->create_subscription<sensor_msgs::msg::JointState>(
+        topic_joint_states, rclcpp::SensorDataQoS().keep_last(1000),
+        std::bind(&ROS2Visualizer::callback_joint_state, this,
+                  std::placeholders::_1));
+    PRINT_INFO("subscribing to JOINT STATES: %s\n", topic_joint_states.c_str());
+  }
+
   // Logic for sync stereo subscriber
   // https://answers.ros.org/question/96346/subscribe-to-two-image_raws-with-one-function/?answer=96491#post-id-96491
   if (_app->get_params().state_options.num_cameras == 2) {
@@ -530,6 +545,17 @@ void ROS2Visualizer::callback_sun(
   }
 
   _app->feed_measurement_sun(message);
+}
+
+void ROS2Visualizer::callback_joint_state(
+    const sensor_msgs::msg::JointState::SharedPtr msg) {
+  ov_core::JointStateData message;
+  message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
+  message.names = msg->name;
+  message.position = msg->position;
+  message.velocity = msg->velocity;
+  message.effort = msg->effort;
+  _app->feed_measurement_joint_state(message);
 }
 
 void ROS2Visualizer::callback_inertial(

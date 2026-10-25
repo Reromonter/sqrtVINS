@@ -96,6 +96,23 @@ void VioManagerOptions::print_and_load_estimator(
     parser->parse_config("up_sun_max_residual_deg", sun_max_residual_deg,
                          false);
     parser->parse_config("up_sun_recover_after_s", sun_recover_after_s, false);
+    parser->parse_config("try_leg_velocity", try_leg_velocity, false);
+    parser->parse_config("up_leg_mechanism_file", leg_mechanism_file, false);
+    parser->parse_config("up_leg_R_BtoI", leg_R_BtoI, false);
+    parser->parse_config("up_leg_p_BinI", leg_p_BinI, false);
+    parser->parse_config("up_leg_sigma_v", leg_sigma_v, false);
+    parser->parse_config("up_leg_half_window_s", leg_half_window_s, false);
+    parser->parse_config("up_leg_time_offset_s", leg_time_offset_s, false);
+    parser->parse_config("up_leg_share_on", leg_share_on, false);
+    parser->parse_config("up_leg_share_off", leg_share_off, false);
+    parser->parse_config("up_leg_min_stance_fraction", leg_min_stance_fraction,
+                         false);
+    parser->parse_config("up_leg_velocity_scale", leg_velocity_scale, false);
+    parser->parse_config("up_leg_max_age_s", leg_max_age_s, false);
+    parser->parse_config("up_leg_recover_after_s", leg_recover_after_s, false);
+    if (try_leg_velocity && !leg_mechanism_file.empty() &&
+        leg_mechanism_file.front() != '/')
+      leg_mechanism_file = parser->get_config_folder() + leg_mechanism_file;
     parser->parse_config("record_timing_information",
                          record_timing_information);
     parser->parse_config("record_timing_filepath", record_timing_filepath);
@@ -124,6 +141,18 @@ void VioManagerOptions::print_and_load_estimator(
   PRINT_DEBUG("  - up_sun_robust: %d\n", sun_robust);
   PRINT_DEBUG("  - up_sun_max_residual_deg: %.2f\n", sun_max_residual_deg);
   PRINT_DEBUG("  - up_sun_recover_after_s: %.2f\n", sun_recover_after_s);
+  PRINT_DEBUG("  - leg_velocity_update: %d\n", try_leg_velocity);
+  PRINT_DEBUG("  - up_leg_mechanism_file: %s\n", leg_mechanism_file.c_str());
+  PRINT_DEBUG("  - up_leg_sigma_v: %.3f\n", leg_sigma_v);
+  PRINT_DEBUG("  - up_leg_half_window_s: %.3f\n", leg_half_window_s);
+  PRINT_DEBUG("  - up_leg_time_offset_s: %.4f\n", leg_time_offset_s);
+  PRINT_DEBUG("  - up_leg_share_on/off: %.2f / %.2f\n", leg_share_on,
+              leg_share_off);
+  PRINT_DEBUG("  - up_leg_min_stance_fraction: %.2f\n",
+              leg_min_stance_fraction);
+  PRINT_DEBUG("  - up_leg_velocity_scale: %.3f\n", leg_velocity_scale);
+  PRINT_DEBUG("  - up_leg_max_age_s: %.2f\n", leg_max_age_s);
+  PRINT_DEBUG("  - up_leg_recover_after_s: %.2f\n", leg_recover_after_s);
   PRINT_DEBUG("  - record timing?: %d\n", (int)record_timing_information);
   PRINT_DEBUG("  - record timing filepath: %s\n",
               record_timing_filepath.c_str());
@@ -167,6 +196,9 @@ void VioManagerOptions::print_and_load_noise(
     // SUN SENSOR
     parser->parse_config("up_sun_chi2_multipler", sun_options.chi2_multipler,
                          false);
+    // LEG VELOCITY
+    parser->parse_config("up_leg_chi2_multipler", leg_options.chi2_multipler,
+                         false);
   }
   PRINT_DEBUG("  Updater MSCKF Feats:\n");
   msckf_options.print();
@@ -178,6 +210,8 @@ void VioManagerOptions::print_and_load_noise(
   zupt_options.print();
   PRINT_DEBUG("  Updater SUN SENSOR:\n");
   PRINT_DEBUG("    - chi2_multipler: %.1f\n", sun_options.chi2_multipler);
+  PRINT_DEBUG("  Updater LEG VELOCITY:\n");
+  PRINT_DEBUG("    - chi2_multipler: %.1f\n", leg_options.chi2_multipler);
 }
 
 void VioManagerOptions::print_and_load_state(

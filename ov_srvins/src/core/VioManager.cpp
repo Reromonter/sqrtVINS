@@ -51,6 +51,8 @@
 #include "state/StateHelper.h"
 #include "update/UpdaterMSCKF.h"
 #include "update/UpdaterSLAM.h"
+#include "legs/LegKinematics.h"
+#include "update/UpdaterLegVelocity.h"
 #include "update/UpdaterSunSensor.h"
 #include "update/UpdaterZeroVelocity.h"
 #include "utils/ImagePreprocess.h"
@@ -222,6 +224,58 @@ VioManager::VioManager(VioManagerOptions &params_)
     state->calib_sun_align_yaw->set_value(temp_sun_align_yaw);
     state->calib_sun_align_yaw->set_fej(temp_sun_align_yaw);
   }
+
+  // If the robot's joint states aid the velocity, then create the updater
+  if (params.try_leg_velocity) {
+    if (params.leg_R_BtoI.size() != 9 || params.leg_p_BinI.size() != 3) {
+      PRINT_ERROR(RED "[LEG]: up_leg_R_BtoI needs 9 values (row-major) and "
+                      "up_leg_p_BinI 3\n" RESET);
+      std::exit(EXIT_FAILURE);
+    }
+    UpdaterLegVelocity::Params lp;
+    for (int r = 0; r < 3; r++) {
+      for (int c = 0; c < 3; c++)
+        lp.R_BtoI(r, c) = (DataType)params.leg_R_BtoI.at(3 * r + c);
+      lp.p_BinI(r) = (DataType)params.leg_p_BinI.at(r);
+    }
+    lp.sigma_v = params.leg_sigma_v;
+    lp.half_window_s = params.leg_half_window_s;
+    lp.time_offset_s = params.leg_time_offset_s;
+    lp.share_on = params.leg_share_on;
+    lp.share_off = params.leg_share_off;
+    lp.min_stance_fraction = params.leg_min_stance_fraction;
+    lp.velocity_scale = params.leg_velocity_scale;
+    lp.max_age_s = params.leg_max_age_s;
+    lp.recover_after_s = params.leg_recover_after_s;
+    std::shared_ptr<LegKinematics> kin;
+    try {
+      kin = std::make_shared<LegKinematics>(params.leg_mechanism_file);
+    } catch (const std::exception &e) {
+      PRINT_ERROR(RED "[LEG]: %s\n" RESET, e.what());
+      std::exit(EXIT_FAILURE);
+    }
+    updaterLeg = std::make_shared<UpdaterLegVelocity>(
+        params.leg_options, lp, kin,
+        [this](double t0, double t1, Vec3 &w_mean) {
+          return propagator->mean_gyro(t0, t1, w_mean);
+        });
+    // INFO: proves in the run log which update actually ran
+    PRINT_INFO("[LEG]: velocity update on (%s): sigma %.3f m/s, window "
+               "+-%.3f s, stance share %.2f/%.2f, chi2 x%.1f, scale %.3f, "
+               "recover after %.1f s\n",
+               params.leg_mechanism_file.c_str(), params.leg_sigma_v,
+               params.leg_half_window_s, params.leg_share_on,
+               params.leg_share_off, params.leg_options.chi2_multipler,
+               params.leg_velocity_scale, params.leg_recover_after_s);
+  }
+}
+
+void VioManager::feed_measurement_joint_state(
+    const ov_core::JointStateData &message) {
+  if (updaterLeg == nullptr)
+    return;
+  // keep a second behind the state: the update window reaches back 0.1-0.2 s
+  updaterLeg->feed_joint_state(message, state->timestamp - 1.0);
 }
 
 void VioManager::feed_measurement_sun(const ov_core::SunSensorData &message) {
@@ -719,6 +773,11 @@ void VioManager::do_feature_propagate_update(
     updaterSun->try_update(state, state->timestamp,
                            params.sun_azimuth_deg * M_PI / 180.0,
                            params.sun_elevation_deg * M_PI / 180.0);
+  }
+
+  // Leg velocity update, on the state the visual update just produced
+  if (updaterLeg != nullptr) {
+    updaterLeg->try_update(state, state->timestamp);
   }
 
   //===================================================================================
