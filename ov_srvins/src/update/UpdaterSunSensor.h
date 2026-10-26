@@ -111,6 +111,19 @@ public:
    */
   void set_recovery(DataType after_s) { recover_after_s_ = after_s; }
 
+  /**
+   * @brief Start the filter in the ephemeris frame (ENU, true north).
+   *
+   * The initializers leave the heading of G wherever the IMU pointed. With
+   * this on, the first usable reading solves the G-to-ENU yaw and turns the
+   * whole state by it (StateHelper::rotate_global_yaw), so G becomes ENU and
+   * the alignment yaw is zero. Every later reading then corrects the IMU
+   * heading directly, which is what lets calib_sun_align stay off. Applies
+   * with or without calib_sun_align, and regardless of
+   * init_align_from_first_reading.
+   */
+  void set_init_heading(bool enable) { init_heading_ = enable; }
+
   /// Residual (measured - predicted angles, rad) of the last reading that
   /// reached the gate, accepted or not
   Vec2 last_residual() const { return last_residual_; }
@@ -193,6 +206,7 @@ protected:
   bool robust_ = false;
   DataType max_residual_rad_ = 5.0 * M_PI / 180.0;
   DataType recover_after_s_ = 0.0;
+  bool init_heading_ = false;
   Vec2 last_residual_ = Vec2::Zero();
 
   /// State time of the first reading of the current run of readings that

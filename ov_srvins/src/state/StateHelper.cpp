@@ -298,6 +298,58 @@ void StateHelper::inflate_global_yaw(std::shared_ptr<State> state,
                   .triangularView<Eigen::Upper>();
 }
 
+void StateHelper::rotate_global_yaw(std::shared_ptr<State> state,
+                                    DataType dpsi) {
+  // With C = rot_z(dpsi): R_G'toI = R_GtoI * C^T, p' = C p, v' = C v. The JPL
+  // orientation error R = (I - skew(dtheta)) R_hat lives in the local frame and
+  // is unchanged; the position, velocity and landmark errors turn with C. So
+  // P' = T P T^T with T = C on those blocks, i.e. U' = U T^T, re-triangularized.
+  const Mat3 C = rot_z<DataType>(dpsi);
+  MatX U_new = state->U_;
+  auto rotate_cols = [&](int id) {
+    U_new.middleCols(id, 3) = (U_new.middleCols(id, 3) * C.transpose()).eval();
+  };
+  auto rotate_pose = [&](VecX x) {
+    x.head(4) = rot_2_quat(Mat3(quat_2_Rot(x.head(4)) * C.transpose()));
+    x.segment(4, 3) = C * x.segment(4, 3);
+    return x;
+  };
+
+  // IMU: [q p v bg ba], velocity rotates as well
+  auto rotate_imu = [&](VecX x) {
+    x = rotate_pose(x);
+    x.segment(7, 3) = C * x.segment(7, 3);
+    return x;
+  };
+  state->imu->set_value(rotate_imu(state->imu->value()));
+  state->imu->set_fej(rotate_imu(state->imu->fej()));
+  rotate_cols(state->imu->p()->id());
+  rotate_cols(state->imu->v()->id());
+
+  for (const auto &clone : state->clones_IMU) {
+    clone.second->set_value(rotate_pose(clone.second->value()));
+    clone.second->set_fej(rotate_pose(clone.second->fej()));
+    rotate_cols(clone.second->p()->id());
+  }
+
+  for (const auto &feat : state->features_SLAM) {
+    const auto &landmark = feat.second;
+    if (LandmarkRepresentation::is_relative_representation(
+            landmark->feat_representation))
+      continue;
+    landmark->set_from_xyz(C * landmark->get_xyz(false), false);
+    landmark->set_from_xyz(C * landmark->get_xyz(true), true);
+    // Global inverse depth only shifts its azimuth: its error is unchanged
+    if (landmark->feat_representation ==
+        LandmarkRepresentation::Representation::GLOBAL_3D)
+      rotate_cols(landmark->id());
+  }
+
+  efficient_QR(U_new);
+  state->U_ = U_new.topLeftCorner(state->U_.cols(), state->U_.cols())
+                  .triangularView<Eigen::Upper>();
+}
+
 void StateHelper::inflate_velocity(std::shared_ptr<State> state,
                                    DataType sigma) {
   MatX U_new = MatX::Zero(3 + state->U_.rows(), state->U_.cols());

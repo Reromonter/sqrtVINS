@@ -158,6 +158,21 @@ public:
                                  DataType sigma_rad);
 
   /**
+   * @brief Re-express the whole state in a world frame turned about gravity
+   *
+   * Moves G to G' with p_G' = rot_z(dpsi) * p_G: the IMU pose and velocity,
+   * every clone and every global landmark turn with it, values and first
+   * estimates alike, and the covariance is transformed to match. Nothing is
+   * learned or lost - it is a change of gauge, so every camera residual stays
+   * exactly as it was. Biases, calibration and anchored landmarks are relative
+   * quantities and do not change.
+   *
+   * @param state Pointer to state
+   * @param dpsi Rotation of the world frame about its z axis (rad)
+   */
+  static void rotate_global_yaw(std::shared_ptr<State> state, DataType dpsi);
+
+  /**
    * @brief Add isotropic uncertainty to the current IMU velocity
    *
    * Stacks three factor rows on the velocity, i.e. P += sigma^2 I on v_IinG.

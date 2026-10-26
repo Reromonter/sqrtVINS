@@ -91,6 +91,7 @@ void VioManagerOptions::print_and_load_estimator(
     parser->parse_config("sun_align_yaw_deg", sun_align_yaw_deg, false);
     parser->parse_config("sun_init_align_from_first_reading",
                          sun_init_align_from_first_reading, false);
+    parser->parse_config("sun_init_heading", sun_init_heading, false);
     parser->parse_config("up_sun_time_align", sun_time_align, false);
     parser->parse_config("up_sun_robust", sun_robust, false);
     parser->parse_config("up_sun_max_residual_deg", sun_max_residual_deg,
@@ -137,6 +138,7 @@ void VioManagerOptions::print_and_load_estimator(
   PRINT_DEBUG("  - sun_align_yaw_deg: %.4f\n", sun_align_yaw_deg);
   PRINT_DEBUG("  - sun_init_align_from_first_reading: %d\n",
               sun_init_align_from_first_reading);
+  PRINT_DEBUG("  - sun_init_heading: %d\n", sun_init_heading);
   PRINT_DEBUG("  - up_sun_time_align: %d\n", sun_time_align);
   PRINT_DEBUG("  - up_sun_robust: %d\n", sun_robust);
   PRINT_DEBUG("  - up_sun_max_residual_deg: %.2f\n", sun_max_residual_deg);
