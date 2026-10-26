@@ -29,6 +29,8 @@
 
 #include "TrackKLT.h"
 
+#include <algorithm>
+
 #include "Grider_FAST.h"
 #include "Grider_GRID.h"
 #include "cam/CamBase.h"
@@ -38,6 +40,45 @@
 #include "utils/print.h"
 
 using namespace ov_core;
+
+namespace {
+
+// How far the tracks that survived temporal KLT + RANSAC moved since the last
+// processed frame, in tracking-image pixels (logged as [FLOW] once per frame)
+struct FlowStats {
+  int old = 0; // features in the last frame (tracked + newly detected)
+  int ok = 0;  // of those, tracked into this frame and inside the image
+  float med = 0.0f, p90 = 0.0f, max = 0.0f;
+};
+
+FlowStats flow_stats(const std::vector<cv::KeyPoint> &pts_old,
+                     const std::vector<cv::KeyPoint> &pts_new,
+                     const std::vector<uchar> &mask, const cv::Mat &img) {
+  FlowStats s;
+  s.old = (int)pts_old.size();
+  std::vector<float> d;
+  for (size_t i = 0; i < pts_old.size() && i < mask.size(); i++) {
+    const cv::Point2f &p = pts_new.at(i).pt;
+    if (!mask[i] || p.x < 0 || p.y < 0 || (int)p.x >= img.cols ||
+        (int)p.y >= img.rows)
+      continue;
+    d.push_back((float)cv::norm(p - pts_old.at(i).pt));
+  }
+  s.ok = (int)d.size();
+  if (d.empty())
+    return s;
+  auto quantile = [&d](double q) {
+    auto k = d.begin() + (size_t)(q * (d.size() - 1));
+    std::nth_element(d.begin(), k, d.end());
+    return *k;
+  };
+  s.med = quantile(0.5);
+  s.p90 = quantile(0.9);
+  s.max = *std::max_element(d.begin(), d.end());
+  return s;
+}
+
+} // namespace
 
 void TrackKLT::feed_new_camera(const CameraData &message) {
 
@@ -159,6 +200,12 @@ void TrackKLT::feed_monocular(const CameraData &message, size_t msg_id) {
                    cam_id, cam_id, mask_ll);
   assert(pts_left_new.size() == ids_left_old.size());
   rT4 = boost::posix_time::microsec_clock::local_time();
+
+  FlowStats flow = flow_stats(pts_left_old, pts_left_new, mask_ll, img);
+  PRINT_INFO("[FLOW]: t=%.4f w=%d | cam%zu old=%d ok=%d px med=%.2f p90=%.2f "
+             "max=%.2f\n",
+             message.timestamp, img.cols, cam_id, flow.old, flow.ok, flow.med,
+             flow.p90, flow.max);
 
   // If any of our mask is empty, that means we didn't have enough to do ransac,
   // so just return
@@ -307,6 +354,15 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left,
                   }
                 }));
   rT4 = boost::posix_time::microsec_clock::local_time();
+
+  FlowStats flow_l = flow_stats(pts_left_old, pts_left_new, mask_ll, img_left);
+  FlowStats flow_r =
+      flow_stats(pts_right_old, pts_right_new, mask_rr, img_right);
+  PRINT_INFO("[FLOW]: t=%.4f w=%d | cam%zu old=%d ok=%d px med=%.2f p90=%.2f "
+             "max=%.2f | cam%zu old=%d ok=%d px med=%.2f p90=%.2f max=%.2f\n",
+             message.timestamp, img_left.cols, cam_id_left, flow_l.old,
+             flow_l.ok, flow_l.med, flow_l.p90, flow_l.max, cam_id_right,
+             flow_r.old, flow_r.ok, flow_r.med, flow_r.p90, flow_r.max);
 
   //===================================================================================
   //===================================================================================

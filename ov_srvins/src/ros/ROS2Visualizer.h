@@ -30,10 +30,12 @@
 #ifndef OV_SRVINS_ROS2VISUALIZER_H
 #define OV_SRVINS_ROS2VISUALIZER_H
 
+#include <chrono>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
-#include <image_transport/image_transport.h>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
+#include <image_transport/image_transport.hpp>
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/time_synchronizer.h>
@@ -43,6 +45,7 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <sensor_msgs/msg/point_cloud.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -50,7 +53,7 @@
 #include <std_msgs/msg/float64.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/transform_datatypes.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <atomic>
@@ -62,7 +65,12 @@
 #include <Eigen/Eigen>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem.hpp>
+// humble only ships cv_bridge.h; iron and later add (and prefer) .hpp
+#if __has_include(<cv_bridge/cv_bridge.hpp>)
+#include <cv_bridge/cv_bridge.hpp>
+#else
 #include <cv_bridge/cv_bridge.h>
+#endif
 
 namespace ov_core {
 class YamlParser;
@@ -124,6 +132,12 @@ public:
   /// Callback for inertial information
   void callback_inertial(const sensor_msgs::msg::Imu::SharedPtr msg);
 
+  /// Callback for the two-axis sun sensor 
+  void callback_sun(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
+
+  /// Callback for joint states (leg velocity update)
+  void callback_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg);
+
   /// Callback for monocular cameras information
   void callback_monocular(const sensor_msgs::msg::Image::SharedPtr msg0,
                           int cam_id0);
@@ -173,6 +187,8 @@ protected:
 
   // Our subscribers and camera synchronizers
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
+  rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr sub_sun;
+  rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_joint_state;
   std::vector<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr>
       subs_cam;
   typedef message_filters::sync_policies::ApproximateTime<
@@ -225,6 +241,15 @@ protected:
   std::vector<geometry_msgs::msg::PoseStamped> poses_gt;
   bool publish_global2imu_tf = true;
   bool publish_calibration_tf = true;
+
+  // If >0, decimate the odomimu publish (and its TF) to this rate, independent
+  // of the IMU input rate — state propagation via feed_measurement_imu() in
+  // callback_inertial() is unaffected. 0 (default) publishes on every sample.
+  double odom_publish_rate_hz = 0.0;
+  double last_odom_pub_timestamp = -1.0;
+  // Wall time the last fast propagation for odomimu finished; gates a burst
+  // of queued IMU (after a stall) that the message stamps alone would not
+  std::chrono::steady_clock::time_point last_odom_prop_wall;
 
   // Files and if we should save total state
   bool save_total_state = false;

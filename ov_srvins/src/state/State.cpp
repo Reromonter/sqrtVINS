@@ -39,6 +39,7 @@ State::State(StateOptions &options_,
       cam_pose_fej_buffer(options_.max_clone_size + 2, options_.num_cameras),
       kCloneStartId(15 + // IMU
                     (options_.do_calib_camera_timeoffset ? 1 : 0) +
+                    (options_.do_calib_sun_align ? 1 : 0) +
                     options_.num_cameras *
                         (options_.do_calib_camera_pose ? 6 : 0) +
                     options_.num_cameras *
@@ -55,6 +56,7 @@ State::State(StateOptions &options_,
       options.max_slam_features * kFeatSize + options.max_clone_size * 6 +
       15 + // IMU
       (options.do_calib_camera_timeoffset ? 1 : 0) +
+      (options.do_calib_sun_align ? 1 : 0) +
       options.num_cameras *
           (options.do_calib_camera_pose ? options.num_cameras * 6 : 0) +
       options.num_cameras *
@@ -119,12 +121,24 @@ State::State(StateOptions &options_,
     }
   }
 
+  // Yaw between the VINS world frame G and the sun ephemeris frame (ENU).
+  calib_sun_align_yaw = std::make_shared<Vec>(1);
+  if (options.do_calib_sun_align) {
+    calib_sun_align_yaw->set_local_id(current_id);
+    variables_.push_back(calib_sun_align_yaw);
+    current_id += calib_sun_align_yaw->size();
+  }
+
   // Finally initialize our covariance to small value
   U_ = 1e-3 * MatX::Identity(current_id, current_id);
 
   // Finally, set some of our priors for our calibration parameters
   if (options.do_calib_camera_timeoffset) {
     U_(calib_dt_CAMtoIMU->id(), calib_dt_CAMtoIMU->id()) = 0.01;
+  }
+  if (options.do_calib_sun_align) {
+    U_(calib_sun_align_yaw->id(), calib_sun_align_yaw->id()) =
+        init_options.init_prior_sun_align;
   }
   if (options.do_calib_camera_pose) {
     for (int i = 0; i < options.num_cameras; i++) {

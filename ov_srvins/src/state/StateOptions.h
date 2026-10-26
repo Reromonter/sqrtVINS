@@ -60,6 +60,10 @@ struct StateOptions {
   /// Bool to determine whether or not to calibrate camera to IMU time offset
   bool do_calib_camera_timeoffset = false;
 
+  /// Bool to determine whether or not to estimate the yaw offset between the
+  /// VINS world frame G and the frame the sun ephemeris
+  bool do_calib_sun_align = false;
+
   /// Max clone size of sliding window
   int max_clone_size = 11;
 
@@ -99,6 +103,7 @@ struct StateOptions {
       parser->parse_config("calib_cam_extrinsics", do_calib_camera_pose);
       parser->parse_config("calib_cam_intrinsics", do_calib_camera_intrinsics);
       parser->parse_config("calib_cam_timeoffset", do_calib_camera_timeoffset);
+      parser->parse_config("calib_sun_align", do_calib_sun_align, false);
       parser->parse_config("max_clones", max_clone_size);
       parser->parse_config("max_slam", max_slam_features);
       parser->parse_config("max_slam_in_update", max_slam_in_update);
@@ -124,6 +129,7 @@ struct StateOptions {
     PRINT_DEBUG("  - calib_cam_extrinsics: %d\n", do_calib_camera_pose);
     PRINT_DEBUG("  - calib_cam_intrinsics: %d\n", do_calib_camera_intrinsics);
     PRINT_DEBUG("  - calib_cam_timeoffset: %d\n", do_calib_camera_timeoffset);
+    PRINT_DEBUG("  - calib_sun_align: %d\n", do_calib_sun_align);
     PRINT_DEBUG("  - max_clones: %d\n", max_clone_size);
     PRINT_DEBUG("  - max_slam: %d\n", max_slam_features);
     PRINT_DEBUG("  - max_slam_in_update: %d\n", max_slam_in_update);

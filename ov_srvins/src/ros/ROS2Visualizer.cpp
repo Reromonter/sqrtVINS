@@ -35,9 +35,12 @@
 #include "state/Propagator.h"
 #include "state/State.h"
 #include "state/StateHelper.h"
+#include "utils/colors.h"
 #include "utils/dataset_reader.h"
 #include "utils/print.h"
 #include "utils/sensor_data.h"
+
+#include <cmath>
 
 using namespace ov_core;
 using namespace ov_type;
@@ -96,6 +99,9 @@ ROS2Visualizer::ROS2Visualizer(std::shared_ptr<rclcpp::Node> node,
   }
   if (node->has_parameter("publish_calibration_tf")) {
     node->get_parameter<bool>("publish_calibration_tf", publish_calibration_tf);
+  }
+  if (node->has_parameter("odom_publish_rate_hz")) {
+    node->get_parameter<double>("odom_publish_rate_hz", odom_publish_rate_hz);
   }
 
   // Load groundtruth if we have it and are not doing simulation
@@ -187,11 +193,43 @@ void ROS2Visualizer::setup_subscribers(
   _node->declare_parameter<std::string>("topic_imu", "/imu0");
   _node->get_parameter("topic_imu", topic_imu);
   parser->parse_external("relative_config_imu", "imu0", "rostopic", topic_imu);
+  // Keep 5 s of 400 Hz IMU (SensorDataQoS keeps 5 samples): when the callbacks
+  // are blocked for a moment (e.g. the camera callback waiting on a long
+  // update), the IMU is delivered late instead of lost, so the filter never
+  // propagates across a hole
   sub_imu = _node->create_subscription<sensor_msgs::msg::Imu>(
-      topic_imu, rclcpp::SensorDataQoS(),
+      topic_imu, rclcpp::SensorDataQoS().keep_last(2000),
       std::bind(&ROS2Visualizer::callback_inertial, this,
                 std::placeholders::_1));
   PRINT_INFO("subscribing to IMU: %s\n", topic_imu.c_str());
+
+  // Create the sun sensor subscriber, if the sun update is enabled
+  if (_app->get_params().try_sun_sensor) {
+    std::string topic_sun;
+    _node->declare_parameter<std::string>("topic_sun",
+                                          "/sun_sensor/measurement");
+    _node->get_parameter("topic_sun", topic_sun);
+    parser->parse_config("topic_sun", topic_sun, false);
+    sub_sun = _node->create_subscription<geometry_msgs::msg::Vector3Stamped>(
+        topic_sun, rclcpp::SensorDataQoS(),
+        std::bind(&ROS2Visualizer::callback_sun, this, std::placeholders::_1));
+    PRINT_INFO("subscribing to SUN SENSOR: %s\n", topic_sun.c_str());
+  }
+
+  // Create the joint state subscriber, if the leg velocity update is enabled
+  if (_app->get_params().try_leg_velocity) {
+    std::string topic_joint_states;
+    _node->declare_parameter<std::string>("topic_joint_states",
+                                          "/quadruped/joint_states");
+    _node->get_parameter("topic_joint_states", topic_joint_states);
+    parser->parse_config("topic_joint_states", topic_joint_states, false);
+    // 200 Hz, consumed once per camera frame: keep a few seconds
+    sub_joint_state = _node->create_subscription<sensor_msgs::msg::JointState>(
+        topic_joint_states, rclcpp::SensorDataQoS().keep_last(1000),
+        std::bind(&ROS2Visualizer::callback_joint_state, this,
+                  std::placeholders::_1));
+    PRINT_INFO("subscribing to JOINT STATES: %s\n", topic_joint_states.c_str());
+  }
 
   // Logic for sync stereo subscriber
   // https://answers.ros.org/question/96346/subscribe-to-two-image_raws-with-one-function/?answer=96491#post-id-96491
@@ -314,14 +352,34 @@ void ROS2Visualizer::visualize_odometry(double timestamp) {
   if (!_app->initialized() || (timestamp - _app->initialized_time()) < 1)
     return;
 
+  // Decimate the odomimu publish (pose/twist message + TF) independent of the
+  // IMU sample rate. State propagation already happened in feed_measurement_imu()
+  // before this was called, so estimator accuracy is unaffected.
+  // The fast propagation integrates every IMU sample since the last update, so
+  // a burst of IMU queued during a stall would cost O(n^2): also skip samples
+  // that arrive within half a period of the previous propagation finishing.
+  if (odom_publish_rate_hz > 0.0) {
+    double min_dt = 1.0 / odom_publish_rate_hz;
+    double wall_dt = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now() - last_odom_prop_wall)
+                         .count();
+    if (last_odom_pub_timestamp > 0.0 &&
+        ((timestamp - last_odom_pub_timestamp) < min_dt ||
+         wall_dt < 0.5 * min_dt))
+      return;
+    last_odom_pub_timestamp = timestamp;
+  }
+
   // Get fast propagate state at the desired timestamp
   std::shared_ptr<State> state = _app->get_state();
   Eigen::Matrix<DataType, 13, 1> state_plus =
       Eigen::Matrix<DataType, 13, 1>::Zero();
   Eigen::Matrix<DataType, 12, 12> cov_plus =
       Eigen::Matrix<DataType, 12, 12>::Zero();
-  if (!_app->get_propagator()->fast_state_propagate(state, timestamp,
-                                                    state_plus, cov_plus))
+  bool propagated = _app->get_propagator()->fast_state_propagate(
+      state, timestamp, state_plus, cov_plus);
+  last_odom_prop_wall = std::chrono::steady_clock::now();
+  if (!propagated)
     return;
 
   // Publish our odometry message if requested
@@ -468,6 +526,36 @@ void ROS2Visualizer::visualize_final() {
   rT2 = boost::posix_time::microsec_clock::local_time();
   PRINT_INFO(REDPURPLE "TIME: %.3f seconds\n\n" RESET,
              (rT2 - rT1).total_microseconds() * 1e-6);
+}
+
+void ROS2Visualizer::callback_sun(
+    const geometry_msgs::msg::Vector3Stamped::SharedPtr msg) {
+
+  // Pubish sun sensor measurements
+  ov_core::SunSensorData message;
+  message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
+  message.alpha = std::atan2(msg->vector.x, msg->vector.z);
+  message.beta = std::atan2(msg->vector.y, msg->vector.z);
+
+  if (!std::isfinite(message.alpha) || !std::isfinite(message.beta)) {
+    PRINT_DEBUG(YELLOW "sun sensor published a non-finite direction "
+                       "(%.3f, %.3f, %.3f) - ignoring\n" RESET,
+                msg->vector.x, msg->vector.y, msg->vector.z);
+    return;
+  }
+
+  _app->feed_measurement_sun(message);
+}
+
+void ROS2Visualizer::callback_joint_state(
+    const sensor_msgs::msg::JointState::SharedPtr msg) {
+  ov_core::JointStateData message;
+  message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
+  message.names = msg->name;
+  message.position = msg->position;
+  message.velocity = msg->velocity;
+  message.effort = msg->effort;
+  _app->feed_measurement_joint_state(message);
 }
 
 void ROS2Visualizer::callback_inertial(

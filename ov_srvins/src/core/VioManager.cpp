@@ -41,6 +41,7 @@
 #include "utils/DataType.h"
 #include "utils/opencv_lambda_body.h"
 #include "utils/print.h"
+#include "utils/quat_ops.h"
 #include "utils/sensor_data.h"
 
 #include "initializer/InertialInitializer.h"
@@ -50,7 +51,11 @@
 #include "state/StateHelper.h"
 #include "update/UpdaterMSCKF.h"
 #include "update/UpdaterSLAM.h"
+#include "legs/LegKinematics.h"
+#include "update/UpdaterLegVelocity.h"
+#include "update/UpdaterSunSensor.h"
 #include "update/UpdaterZeroVelocity.h"
+#include "utils/ImagePreprocess.h"
 
 using namespace ov_core;
 using namespace ov_type;
@@ -179,6 +184,107 @@ VioManager::VioManager(VioManagerOptions &params_)
         params.zupt_max_velocity, params.zupt_noise_multiplier,
         params.zupt_max_disparity);
   }
+
+  // If we are aiding the global yaw with a sun sensor, then create the updater
+  if (params.try_sun_sensor) {
+    // URDF rpy gives the sensor's orientation in the IMU frame
+    const auto &rpy = params.sun_extrinsic_rpy_deg;
+    const Mat3 R_ItoS =
+        (ov_core::rot_z<DataType>(rpy.at(2) * M_PI / 180.0) *
+         ov_core::rot_y<DataType>(rpy.at(1) * M_PI / 180.0) *
+         ov_core::rot_x<DataType>(rpy.at(0) * M_PI / 180.0))
+            .transpose();
+    updaterSun = std::make_shared<UpdaterSunSensor>(
+        params.sun_options, params.sun_sigma_alpha, params.sun_sigma_beta,
+        R_ItoS, params.sun_min_elevation_deg * M_PI / 180.0,
+        params.sun_min_gravity_angle_deg * M_PI / 180.0,
+        params.sun_init_align_from_first_reading);
+    updaterSun->set_time_align(
+        params.sun_time_align,
+        [this](double t0, double t1, Vec3 &w_mean) {
+          return propagator->mean_gyro(t0, t1, w_mean);
+        });
+    updaterSun->set_robust(params.sun_robust,
+                           params.sun_max_residual_deg * M_PI / 180.0);
+    updaterSun->set_recovery(params.sun_recover_after_s);
+    // INFO, not DEBUG: an image without these keys ignores them silently, so
+    // this line is how a run log proves which update it actually ran
+    PRINT_INFO("[SUN]: update mode: sigma %.5f / %.5f rad, chi2 x%.1f, "
+               "time_align %d, robust %d (max residual %.1f deg), recover "
+               "after %.1f s\n",
+               params.sun_sigma_alpha, params.sun_sigma_beta,
+               params.sun_options.chi2_multipler, params.sun_time_align,
+               params.sun_robust, params.sun_max_residual_deg,
+               params.sun_recover_after_s);
+
+    // The yaw from G to the ephemeris frame
+    VecX temp_sun_align_yaw;
+    temp_sun_align_yaw.resize(1);
+    temp_sun_align_yaw(0) = params.sun_align_yaw_deg * M_PI / 180.0;
+    state->calib_sun_align_yaw->set_value(temp_sun_align_yaw);
+    state->calib_sun_align_yaw->set_fej(temp_sun_align_yaw);
+  }
+
+  // If the robot's joint states aid the velocity, then create the updater
+  if (params.try_leg_velocity) {
+    if (params.leg_R_BtoI.size() != 9 || params.leg_p_BinI.size() != 3) {
+      PRINT_ERROR(RED "[LEG]: up_leg_R_BtoI needs 9 values (row-major) and "
+                      "up_leg_p_BinI 3\n" RESET);
+      std::exit(EXIT_FAILURE);
+    }
+    UpdaterLegVelocity::Params lp;
+    for (int r = 0; r < 3; r++) {
+      for (int c = 0; c < 3; c++)
+        lp.R_BtoI(r, c) = (DataType)params.leg_R_BtoI.at(3 * r + c);
+      lp.p_BinI(r) = (DataType)params.leg_p_BinI.at(r);
+    }
+    lp.sigma_v = params.leg_sigma_v;
+    lp.half_window_s = params.leg_half_window_s;
+    lp.time_offset_s = params.leg_time_offset_s;
+    lp.share_on = params.leg_share_on;
+    lp.share_off = params.leg_share_off;
+    lp.min_stance_fraction = params.leg_min_stance_fraction;
+    lp.velocity_scale = params.leg_velocity_scale;
+    lp.max_age_s = params.leg_max_age_s;
+    lp.recover_after_s = params.leg_recover_after_s;
+    std::shared_ptr<LegKinematics> kin;
+    try {
+      kin = std::make_shared<LegKinematics>(params.leg_mechanism_file);
+    } catch (const std::exception &e) {
+      PRINT_ERROR(RED "[LEG]: %s\n" RESET, e.what());
+      std::exit(EXIT_FAILURE);
+    }
+    updaterLeg = std::make_shared<UpdaterLegVelocity>(
+        params.leg_options, lp, kin,
+        [this](double t0, double t1, Vec3 &w_mean) {
+          return propagator->mean_gyro(t0, t1, w_mean);
+        });
+    // INFO: proves in the run log which update actually ran
+    PRINT_INFO("[LEG]: velocity update on (%s): sigma %.3f m/s, window "
+               "+-%.3f s, stance share %.2f/%.2f, chi2 x%.1f, scale %.3f, "
+               "recover after %.1f s\n",
+               params.leg_mechanism_file.c_str(), params.leg_sigma_v,
+               params.leg_half_window_s, params.leg_share_on,
+               params.leg_share_off, params.leg_options.chi2_multipler,
+               params.leg_velocity_scale, params.leg_recover_after_s);
+  }
+}
+
+void VioManager::feed_measurement_joint_state(
+    const ov_core::JointStateData &message) {
+  if (updaterLeg == nullptr)
+    return;
+  // keep a second behind the state: the update window reaches back 0.1-0.2 s
+  updaterLeg->feed_joint_state(message, state->timestamp - 1.0);
+}
+
+void VioManager::feed_measurement_sun(const ov_core::SunSensorData &message) {
+  if (updaterSun == nullptr)
+    return;
+
+  // Keep only what the next update could still pair with. The state time is
+  // the reference, so anything older than the last state is already unusable.
+  updaterSun->feed_sun(message, state->timestamp);
 }
 
 void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
@@ -219,16 +325,17 @@ void VioManager::track_image_and_update(
            message_const.sensor_ids.at(i + 1));
   }
 
-  // Downsample if we are downsampling
+  // Blur and downsample if we are doing either
   ov_core::CameraData message = message_const;
-  for (size_t i = 0; i < message.sensor_ids.size() && params.downsample_cameras;
-       i++) {
-    cv::Mat img = message.images.at(i);
-    cv::Mat mask = message.masks.at(i);
+  bool preprocess =
+      params.gaussian_blur_cameras || params.downsample_scale != 1.0;
+  for (size_t i = 0; i < message.sensor_ids.size() && preprocess; i++) {
     cv::Mat img_temp, mask_temp;
-    cv::pyrDown(img, img_temp, cv::Size(img.cols / 2.0, img.rows / 2.0));
+    preprocess_camera_image(message.images.at(i), message.masks.at(i),
+                            params.gaussian_blur_cameras,
+                            params.downsample_scale, img_temp, mask_temp,
+                            params.gaussian_blur_ksize);
     message.images.at(i) = img_temp;
-    cv::pyrDown(mask, mask_temp, cv::Size(mask.cols / 2.0, mask.rows / 2.0));
     message.masks.at(i) = mask_temp;
   }
 
@@ -660,6 +767,18 @@ void VioManager::do_feature_propagate_update(
   rT8 = boost::posix_time::microsec_clock::local_time();
   StateHelper::update_llt(state);
   state->clear(true);
+
+  // Sun the sun sensor update
+  if (updaterSun != nullptr) {
+    updaterSun->try_update(state, state->timestamp,
+                           params.sun_azimuth_deg * M_PI / 180.0,
+                           params.sun_elevation_deg * M_PI / 180.0);
+  }
+
+  // Leg velocity update, on the state the visual update just produced
+  if (updaterLeg != nullptr) {
+    updaterLeg->try_update(state, state->timestamp);
+  }
 
   //===================================================================================
   // Update our visualization feature set, and clean up the old features

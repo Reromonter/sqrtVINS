@@ -29,6 +29,8 @@
 
 #include "DynamicInitializer.h"
 
+#include <fstream>
+
 #include "cpi/CpiV1.h"
 #include "feat/Feature.h"
 #include "feat/FeatureDatabase.h"
@@ -358,8 +360,20 @@ bool DynamicInitializer::initialize(std::shared_ptr<State> &state) {
   Solver srf_solver(state, imu_init, features_vec, map_camera_times,
                     propagator_, updater_msckf_, updater_slam_);
 
-  // Solve the problem
-  if (!srf_solver.solve()) {
+  // Solve the problem. A bad linear gravity estimate can converge to a wrong
+  // minimum that absorbs the error in the gyroscope bias, so reject solutions
+  // whose bias is far from the configured prior and retry on the next window
+  bool solved = srf_solver.solve();
+  if (solved && params_.init_dyn_max_bg > 0) {
+    double dbg = (state->imu->bias_g() - params_.init_dyn_bias_g).norm();
+    if (dbg > params_.init_dyn_max_bg) {
+      PRINT_WARNING(RED "[init-d]: rejected, gyro bias %.4f rad/s from the "
+                        "prior (%.4f thresh)\n" RESET,
+                    dbg, params_.init_dyn_max_bg);
+      solved = false;
+    }
+  }
+  if (!solved) {
     state = std::make_shared<State>(state->options,
                                     state->init_options); // Reset the state
     StateHelper::initialize_state(state, VecX::Zero(15), -1);

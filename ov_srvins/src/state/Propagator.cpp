@@ -35,6 +35,9 @@
 #include "utils/Helper.h"
 #include "utils/quat_ops.h"
 
+#include <algorithm>
+#include <cmath>
+
 using namespace ov_core;
 using namespace ov_type;
 using namespace ov_srvins;
@@ -57,6 +60,34 @@ void Propagator::feed_imu(const ov_core::ImuData &message, double oldest_time) {
 
   // Clean old measurements
   clean_old_imu_measurements(oldest_time);
+}
+
+bool Propagator::mean_gyro(double t0, double t1, Vec3 &w_mean) {
+  std::lock_guard<std::mutex> lck(imu_data_mtx_);
+  if (imu_data_.empty() || imu_data_.front().timestamp > t0 ||
+      imu_data_.back().timestamp < t1)
+    return false;
+  Vec3 sum = Vec3::Zero();
+  int n = 0;
+  for (const auto &imu : imu_data_) {
+    if (imu.timestamp >= t0 && imu.timestamp <= t1) {
+      sum += imu.wm;
+      n++;
+    }
+  }
+  if (n == 0) {
+    // the interval falls between two readings: take the one nearest its middle
+    const double t_mid = 0.5 * (t0 + t1);
+    auto nearest = std::min_element(
+        imu_data_.begin(), imu_data_.end(),
+        [t_mid](const ov_core::ImuData &a, const ov_core::ImuData &b) {
+          return std::abs(a.timestamp - t_mid) < std::abs(b.timestamp - t_mid);
+        });
+    w_mean = nearest->wm;
+    return true;
+  }
+  w_mean = sum / (DataType)n;
+  return true;
 }
 
 void Propagator::clean_old_imu_measurements(double oldest_time) {

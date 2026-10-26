@@ -31,6 +31,7 @@
 #define OV_SRVINS_INERTIALINITIALIZEROPTIONS_H
 
 #include <Eigen/Eigen>
+#include <cmath>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -81,6 +82,11 @@ struct InertialInitializerOptions {
   /// Minimum degrees we need to rotate before we try to init (sum of norm)
   double init_dyn_min_deg = 45.0;
 
+  /// Max distance (rad/s) of the solved gyroscope bias from init_dyn_bias_g
+  /// before the dynamic init is rejected and retried on the next window
+  /// (<= 0 disables the check)
+  double init_dyn_max_bg = -1.0;
+
   /// Minimum reciprocal condition number acceptable for our covariance recovery
   /// (min_sigma / max_sigma < sqrt(min_reciprocal_condition_number))
   double init_dyn_min_rec_cond = 1e-15;
@@ -115,6 +121,7 @@ struct InertialInitializerOptions {
   double init_prior_ba = 0.1;
 
   double init_prior_t = 0.001;
+  double init_prior_sun_align = M_PI;
   double init_prior_qc = 0.02;
   double init_prior_pc = 0.01;
   double init_prior_fc = 1.0;
@@ -179,8 +186,12 @@ struct InertialInitializerOptions {
   bool use_stereo = true;
 
   /// Will half the resolution all tracking image (aruco will be 1/4 instead of
-  /// halved if dowsize_aruoc also enabled)
+  /// halved if dowsize_aruoc also enabled). Legacy for downsample_scale = 0.5.
   bool downsample_cameras = false;
+
+  /// Resolution scale of all tracking images in (0, 1]. Resolved together with
+  /// downsample_cameras when loading.
+  double downsample_scale = 1.0;
 
   /// Time offset between camera and IMU (t_imu = t_cam + t_off)
   double calib_camimu_dt = 0.0;

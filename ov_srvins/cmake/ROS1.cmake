@@ -92,6 +92,9 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterHelper.cpp
         src/update/UpdaterMSCKF.cpp
         src/update/UpdaterSLAM.cpp
+        src/update/UpdaterSunSensor.cpp
+        src/update/UpdaterLegVelocity.cpp
+        src/legs/LegKinematics.cpp
         src/update/UpdaterZeroVelocity.cpp
 
         src/initializer/InertialInitializer.cpp
@@ -103,6 +106,7 @@ list(APPEND LIBRARY_SOURCES
         
         src/utils/Timer.cpp
         src/utils/Helper.cpp
+        src/utils/ImagePreprocess.cpp
         src/utils/NoiseManager.cpp
         src/utils/CameraPoseBuffer.cpp
         src/utils/EigenMatrixBuffer.cpp

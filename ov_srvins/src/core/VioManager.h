@@ -44,6 +44,7 @@
 namespace ov_core {
 struct ImuData;
 struct CameraData;
+struct SunSensorData;
 class TrackBase;
 class FeatureInitializer;
 } // namespace ov_core
@@ -58,6 +59,8 @@ class StateHelper;
 class UpdaterMSCKF;
 class UpdaterSLAM;
 class UpdaterZeroVelocity;
+class UpdaterSunSensor;
+class UpdaterLegVelocity;
 class Propagator;
 
 /**
@@ -85,6 +88,18 @@ public:
    * @param message Contains our timestamp and inertial information
    */
   void feed_measurement_imu(const ov_core::ImuData &message);
+
+  /**
+   * @brief Feed function for two-axis sun sensor data
+   * @param message Contains our timestamp and the two sensor angles
+   */
+  void feed_measurement_sun(const ov_core::SunSensorData &message);
+
+  /**
+   * @brief Feed function for joint states (leg velocity update)
+   * @param message Contains our timestamp and the joints by name
+   */
+  void feed_measurement_joint_state(const ov_core::JointStateData &message);
 
   /**
    * @brief Feed function for camera measurements
@@ -195,6 +210,12 @@ protected:
 
   /// Our zero velocity tracker
   std::shared_ptr<UpdaterZeroVelocity> updaterZUPT;
+
+  /// Our sun sensor yaw-aiding updater
+  std::shared_ptr<UpdaterSunSensor> updaterSun;
+
+  /// Our leg velocity updater (legged robots)
+  std::shared_ptr<UpdaterLegVelocity> updaterLeg;
 
   /// This is the queue of measurement times that have come in since we starting
   /// doing initialization After we initialize, we will want to prop & update to

@@ -40,6 +40,7 @@
 
 #include "state/StateOptions.h"
 #include "update/UpdaterOptions.h"
+#include "utils/ImagePreprocess.h"
 #include "utils/NoiseManager.h"
 
 #include "initializer/InertialInitializerOptions.h"
@@ -76,6 +77,42 @@ void VioManagerOptions::print_and_load_estimator(
     parser->parse_config("zupt_noise_multiplier", zupt_noise_multiplier);
     parser->parse_config("zupt_max_disparity", zupt_max_disparity);
     parser->parse_config("zupt_only_at_beginning", zupt_only_at_beginning);
+    parser->parse_config("try_sun_sensor", try_sun_sensor, false);
+    parser->parse_config("up_sun_sigma_alpha", sun_sigma_alpha, false);
+    parser->parse_config("up_sun_sigma_beta", sun_sigma_beta, false);
+    parser->parse_config("up_sun_min_elevation_deg", sun_min_elevation_deg,
+                         false);
+    parser->parse_config("up_sun_min_gravity_angle_deg",
+                         sun_min_gravity_angle_deg, false);
+    parser->parse_config("up_sun_extrinsic_rpy_deg", sun_extrinsic_rpy_deg,
+                         false);
+    parser->parse_config("sun_azimuth_deg", sun_azimuth_deg, false);
+    parser->parse_config("sun_elevation_deg", sun_elevation_deg, false);
+    parser->parse_config("sun_align_yaw_deg", sun_align_yaw_deg, false);
+    parser->parse_config("sun_init_align_from_first_reading",
+                         sun_init_align_from_first_reading, false);
+    parser->parse_config("up_sun_time_align", sun_time_align, false);
+    parser->parse_config("up_sun_robust", sun_robust, false);
+    parser->parse_config("up_sun_max_residual_deg", sun_max_residual_deg,
+                         false);
+    parser->parse_config("up_sun_recover_after_s", sun_recover_after_s, false);
+    parser->parse_config("try_leg_velocity", try_leg_velocity, false);
+    parser->parse_config("up_leg_mechanism_file", leg_mechanism_file, false);
+    parser->parse_config("up_leg_R_BtoI", leg_R_BtoI, false);
+    parser->parse_config("up_leg_p_BinI", leg_p_BinI, false);
+    parser->parse_config("up_leg_sigma_v", leg_sigma_v, false);
+    parser->parse_config("up_leg_half_window_s", leg_half_window_s, false);
+    parser->parse_config("up_leg_time_offset_s", leg_time_offset_s, false);
+    parser->parse_config("up_leg_share_on", leg_share_on, false);
+    parser->parse_config("up_leg_share_off", leg_share_off, false);
+    parser->parse_config("up_leg_min_stance_fraction", leg_min_stance_fraction,
+                         false);
+    parser->parse_config("up_leg_velocity_scale", leg_velocity_scale, false);
+    parser->parse_config("up_leg_max_age_s", leg_max_age_s, false);
+    parser->parse_config("up_leg_recover_after_s", leg_recover_after_s, false);
+    if (try_leg_velocity && !leg_mechanism_file.empty() &&
+        leg_mechanism_file.front() != '/')
+      leg_mechanism_file = parser->get_config_folder() + leg_mechanism_file;
     parser->parse_config("record_timing_information",
                          record_timing_information);
     parser->parse_config("record_timing_filepath", record_timing_filepath);
@@ -86,6 +123,36 @@ void VioManagerOptions::print_and_load_estimator(
   PRINT_DEBUG("  - zupt_noise_multiplier: %.2f\n", zupt_noise_multiplier);
   PRINT_DEBUG("  - zupt_max_disparity: %.4f\n", zupt_max_disparity);
   PRINT_DEBUG("  - zupt_only_at_beginning?: %d\n", zupt_only_at_beginning);
+  PRINT_DEBUG("  - sun_sensor_update: %d\n", try_sun_sensor);
+  PRINT_DEBUG("  - up_sun_sigma_alpha: %.5f\n", sun_sigma_alpha);
+  PRINT_DEBUG("  - up_sun_sigma_beta: %.5f\n", sun_sigma_beta);
+  PRINT_DEBUG("  - up_sun_min_elevation_deg: %.2f\n", sun_min_elevation_deg);
+  PRINT_DEBUG("  - up_sun_min_gravity_angle_deg: %.2f\n",
+              sun_min_gravity_angle_deg);
+  PRINT_DEBUG("  - up_sun_extrinsic_rpy_deg: %.2f, %.2f, %.2f\n",
+              sun_extrinsic_rpy_deg.at(0), sun_extrinsic_rpy_deg.at(1),
+              sun_extrinsic_rpy_deg.at(2));
+  PRINT_DEBUG("  - sun_azimuth_deg: %.4f\n", sun_azimuth_deg);
+  PRINT_DEBUG("  - sun_elevation_deg: %.4f\n", sun_elevation_deg);
+  PRINT_DEBUG("  - sun_align_yaw_deg: %.4f\n", sun_align_yaw_deg);
+  PRINT_DEBUG("  - sun_init_align_from_first_reading: %d\n",
+              sun_init_align_from_first_reading);
+  PRINT_DEBUG("  - up_sun_time_align: %d\n", sun_time_align);
+  PRINT_DEBUG("  - up_sun_robust: %d\n", sun_robust);
+  PRINT_DEBUG("  - up_sun_max_residual_deg: %.2f\n", sun_max_residual_deg);
+  PRINT_DEBUG("  - up_sun_recover_after_s: %.2f\n", sun_recover_after_s);
+  PRINT_DEBUG("  - leg_velocity_update: %d\n", try_leg_velocity);
+  PRINT_DEBUG("  - up_leg_mechanism_file: %s\n", leg_mechanism_file.c_str());
+  PRINT_DEBUG("  - up_leg_sigma_v: %.3f\n", leg_sigma_v);
+  PRINT_DEBUG("  - up_leg_half_window_s: %.3f\n", leg_half_window_s);
+  PRINT_DEBUG("  - up_leg_time_offset_s: %.4f\n", leg_time_offset_s);
+  PRINT_DEBUG("  - up_leg_share_on/off: %.2f / %.2f\n", leg_share_on,
+              leg_share_off);
+  PRINT_DEBUG("  - up_leg_min_stance_fraction: %.2f\n",
+              leg_min_stance_fraction);
+  PRINT_DEBUG("  - up_leg_velocity_scale: %.3f\n", leg_velocity_scale);
+  PRINT_DEBUG("  - up_leg_max_age_s: %.2f\n", leg_max_age_s);
+  PRINT_DEBUG("  - up_leg_recover_after_s: %.2f\n", leg_recover_after_s);
   PRINT_DEBUG("  - record timing?: %d\n", (int)record_timing_information);
   PRINT_DEBUG("  - record timing filepath: %s\n",
               record_timing_filepath.c_str());
@@ -126,6 +193,12 @@ void VioManagerOptions::print_and_load_noise(
     aruco_options = UpdaterOptions(chi2_mult, sigma_pix);
     // ZUPT
     parser->parse_config("zupt_chi2_multipler", zupt_options.chi2_multipler);
+    // SUN SENSOR
+    parser->parse_config("up_sun_chi2_multipler", sun_options.chi2_multipler,
+                         false);
+    // LEG VELOCITY
+    parser->parse_config("up_leg_chi2_multipler", leg_options.chi2_multipler,
+                         false);
   }
   PRINT_DEBUG("  Updater MSCKF Feats:\n");
   msckf_options.print();
@@ -135,6 +208,10 @@ void VioManagerOptions::print_and_load_noise(
   aruco_options.print();
   PRINT_DEBUG("  Updater ZUPT:\n");
   zupt_options.print();
+  PRINT_DEBUG("  Updater SUN SENSOR:\n");
+  PRINT_DEBUG("    - chi2_multipler: %.1f\n", sun_options.chi2_multipler);
+  PRINT_DEBUG("  Updater LEG VELOCITY:\n");
+  PRINT_DEBUG("    - chi2_multipler: %.1f\n", leg_options.chi2_multipler);
 }
 
 void VioManagerOptions::print_and_load_state(
@@ -145,6 +222,18 @@ void VioManagerOptions::print_and_load_state(
                          state_options.num_cameras); // might be redundant
     parser->parse_config("downsample_cameras",
                          downsample_cameras); // might be redundant
+    parser->parse_config("downsample_scale", downsample_scale, false);
+    if (!resolve_downsample_scale(downsample_cameras, downsample_scale,
+                                  downsample_scale)) {
+      PRINT_ERROR(RED "VioManager(): invalid camera downsampling "
+                      "(downsample_cameras: %d, "
+                      "downsample_scale: %.3f):\n" RESET,
+                  downsample_cameras, downsample_scale);
+      PRINT_ERROR(RED "\t- downsample_scale must be in (0, 1]\n" RESET);
+      PRINT_ERROR(RED "\t- downsample_cameras: true means downsample_scale: "
+                      "0.5, only set one of them\n" RESET);
+      std::exit(EXIT_FAILURE);
+    }
     for (int i = 0; i < state_options.num_cameras; i++) {
 
       // Time offset (use the first one)
@@ -174,18 +263,21 @@ void VioManagerOptions::print_and_load_state(
       cam_calib << cam_calib1.at(0), cam_calib1.at(1), cam_calib1.at(2),
           cam_calib1.at(3), cam_calib2.at(0), cam_calib2.at(1),
           cam_calib2.at(2), cam_calib2.at(3);
-      cam_calib(0) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(1) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(2) /= (downsample_cameras) ? 2.0 : 1.0;
-      cam_calib(3) /= (downsample_cameras) ? 2.0 : 1.0;
 
       // FOV / resolution
       std::vector<int> matrix_wh = {1, 1};
       parser->parse_external("relative_config_imucam",
                              "cam" + std::to_string(i), "resolution",
                              matrix_wh);
-      matrix_wh.at(0) /= (downsample_cameras) ? 2.0 : 1.0;
-      matrix_wh.at(1) /= (downsample_cameras) ? 2.0 : 1.0;
+
+      // Bring the calibration to the resolution we will track at
+      if (downsample_scale != 1.0) {
+        scale_camera_intrinsics(cam_calib, matrix_wh.at(0), matrix_wh.at(1),
+                                downsample_scale);
+        cv::Size scaled = scaled_image_size(matrix_wh.at(0), matrix_wh.at(1),
+                                            downsample_scale);
+        matrix_wh = {scaled.width, scaled.height};
+      }
       std::pair<int, int> wh(matrix_wh.at(0), matrix_wh.at(1));
 
       // Extrinsics
@@ -284,6 +376,15 @@ void VioManagerOptions::print_and_load_trackers(
     parser->parse_config("use_aruco", use_aruco);
     parser->parse_config("downsize_aruco", downsize_aruco);
     parser->parse_config("downsample_cameras", downsample_cameras);
+    parser->parse_config("gaussian_blur_cameras", gaussian_blur_cameras,
+                         false);
+    parser->parse_config("gaussian_blur_ksize", gaussian_blur_ksize, false);
+    if (!valid_gaussian_blur_ksize(gaussian_blur_ksize)) {
+      PRINT_ERROR(RED "VioManager(): invalid gaussian_blur_ksize %d, it must be "
+                      "odd and at least 3\n" RESET,
+                  gaussian_blur_ksize);
+      std::exit(EXIT_FAILURE);
+    }
     parser->parse_config("num_opencv_threads", num_opencv_threads);
     parser->parse_config("multi_threading_pubs", use_multi_threading_pubs,
                          false);
@@ -319,6 +420,9 @@ void VioManagerOptions::print_and_load_trackers(
   PRINT_DEBUG("  - use_aruco: %d\n", use_aruco);
   PRINT_DEBUG("  - downsize aruco: %d\n", downsize_aruco);
   PRINT_DEBUG("  - downsize cameras: %d\n", downsample_cameras);
+  PRINT_DEBUG("  - downsample scale: %.3f\n", downsample_scale);
+  PRINT_DEBUG("  - gaussian blur cameras: %d\n", gaussian_blur_cameras);
+  PRINT_DEBUG("  - gaussian blur ksize: %d\n", gaussian_blur_ksize);
   PRINT_DEBUG("  - num opencv threads: %d\n", num_opencv_threads);
   PRINT_DEBUG("  - use multi-threading pubs: %d\n", use_multi_threading_pubs);
   PRINT_DEBUG("  - use multi-threading subs: %d\n", use_multi_threading_subs);

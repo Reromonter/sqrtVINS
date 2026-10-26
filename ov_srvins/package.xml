@@ -46,6 +46,7 @@
     <depend condition="$ROS_VERSION == 2">image_transport</depend>
     <depend condition="$ROS_VERSION == 2">ov_core</depend>
     <!-- <depend condition="$ROS_VERSION == 2">ov_init</depend> -->
+    <test_depend condition="$ROS_VERSION == 2">ament_cmake_gtest</test_depend>
 
     <!-- System dependencies for both versions -->
     <depend>eigen</depend>

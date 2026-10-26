@@ -226,6 +226,9 @@ public:
   /// Time offset base IMU to camera (t_imu = t_cam + t_off)
   std::shared_ptr<ov_type::Vec> calib_dt_CAMtoIMU;
 
+  /// Yaw offset between the VINS world frame G and the frame the sun ephemeris (ENU, i.e. true north)
+  std::shared_ptr<ov_type::Vec> calib_sun_align_yaw;
+
   /// Calibration poses for each camera (R_ItoC, p_IinC)
   std::unordered_map<size_t, std::shared_ptr<ov_type::PoseJPL>> calib_IMUtoCAM;
 

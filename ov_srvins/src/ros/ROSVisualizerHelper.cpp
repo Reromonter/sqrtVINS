@@ -47,7 +47,7 @@ ROSVisualizerHelper::get_ros_pointcloud(const std::vector<Vec3> &feats) {
   sensor_msgs::PointCloud2 cloud;
   cloud.header.frame_id = "global";
   cloud.header.stamp = ros::Time::now();
-  cloud.width = 3 * feats.size();
+  cloud.width = feats.size(); // points, not floats: "xyz" makes each point 3 floats
   cloud.height = 1;
   cloud.is_bigendian = false;
   cloud.is_dense = false; // there may be invalid points
@@ -55,7 +55,7 @@ ROSVisualizerHelper::get_ros_pointcloud(const std::vector<Vec3> &feats) {
   // Setup pointcloud fields
   sensor_msgs::PointCloud2Modifier modifier(cloud);
   modifier.setPointCloud2FieldsByString(1, "xyz");
-  modifier.resize(3 * feats.size());
+  modifier.resize(feats.size());
 
   // Iterators
   sensor_msgs::PointCloud2Iterator<float> out_x(cloud, "x");
@@ -108,7 +108,7 @@ ROSVisualizerHelper::get_ros_pointcloud(std::shared_ptr<rclcpp::Node> node,
   sensor_msgs::msg::PointCloud2 cloud;
   cloud.header.frame_id = "global";
   cloud.header.stamp = node->now();
-  cloud.width = 3 * feats.size();
+  cloud.width = feats.size(); // points, not floats: "xyz" makes each point 3 floats
   cloud.height = 1;
   cloud.is_bigendian = false;
   cloud.is_dense = false; // there may be invalid points
@@ -116,7 +116,7 @@ ROSVisualizerHelper::get_ros_pointcloud(std::shared_ptr<rclcpp::Node> node,
   // Setup pointcloud fields
   sensor_msgs::PointCloud2Modifier modifier(cloud);
   modifier.setPointCloud2FieldsByString(1, "xyz");
-  modifier.resize(3 * feats.size());
+  modifier.resize(feats.size());
 
   // Iterators
   sensor_msgs::PointCloud2Iterator<float> out_x(cloud, "x");

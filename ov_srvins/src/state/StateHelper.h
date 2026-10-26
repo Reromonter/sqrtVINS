@@ -143,6 +143,33 @@ public:
         std::shared_ptr<ov_type::Type> variable_to_clone);
 
   /**
+   * @brief Add uncertainty along the global yaw of the whole trajectory
+   *
+   * Stacks one factor row along the direction VIO cannot observe: a rotation
+   * of G about gravity, which turns the IMU pose and velocity and every clone
+   * by the same angle (anchored landmarks and calibration do not move). The
+   * camera updates see no change along it, so they leave the inflation for an
+   * absolute heading reference to resolve instead of pulling it back.
+   *
+   * @param state Pointer to state
+   * @param sigma_rad 1-sigma of the added global yaw (rad)
+   */
+  static void inflate_global_yaw(std::shared_ptr<State> state,
+                                 DataType sigma_rad);
+
+  /**
+   * @brief Add isotropic uncertainty to the current IMU velocity
+   *
+   * Stacks three factor rows on the velocity, i.e. P += sigma^2 I on v_IinG.
+   * Used to re-acquire an absolute velocity reference after the filter
+   * drifted past its gate.
+   *
+   * @param state Pointer to state
+   * @param sigma 1-sigma of the added velocity uncertainty (m/s)
+   */
+  static void inflate_velocity(std::shared_ptr<State> state, DataType sigma);
+
+  /**
    * @brief Perform the SREKF update step using LLT
    * @param state Pointer to state
    * @param is_iterative If true, this is part of an iterative update

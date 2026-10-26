@@ -272,6 +272,42 @@ StateHelper::clone(std::shared_ptr<State> state,
   return variable_to_clone;
 }
 
+void StateHelper::inflate_global_yaw(std::shared_ptr<State> state,
+                                     DataType sigma_rad) {
+  // A rotation of G by dpsi about z moves, to first order and with the JPL
+  // error R = (I - skew(dtheta)) R_hat:
+  //   dtheta = R_GtoI * e_z * dpsi,  dp = e_z x p * dpsi,  dv = e_z x v * dpsi
+  const Vec3 e_z(0.0, 0.0, 1.0);
+  MatX U_new = MatX::Zero(1 + state->U_.rows(), state->U_.cols());
+  U_new.bottomRows(state->U_.rows()) = state->U_;
+  auto add_pose = [&](const Mat3 &R_GtoI, const Vec3 &p_IinG, int q_id,
+                      int p_id) {
+    U_new.block(0, q_id, 1, 3) = sigma_rad * (R_GtoI * e_z).transpose();
+    U_new.block(0, p_id, 1, 3) = sigma_rad * e_z.cross(p_IinG).transpose();
+  };
+  add_pose(state->imu->Rot(), state->imu->pos(), state->imu->q()->id(),
+           state->imu->p()->id());
+  U_new.block(0, state->imu->v()->id(), 1, 3) =
+      sigma_rad * e_z.cross(state->imu->vel()).transpose();
+  for (const auto &clone : state->clones_IMU) {
+    add_pose(clone.second->Rot(), clone.second->pos(),
+             clone.second->q()->id(), clone.second->p()->id());
+  }
+  efficient_QR(U_new);
+  state->U_ = U_new.topLeftCorner(state->U_.cols(), state->U_.cols())
+                  .triangularView<Eigen::Upper>();
+}
+
+void StateHelper::inflate_velocity(std::shared_ptr<State> state,
+                                   DataType sigma) {
+  MatX U_new = MatX::Zero(3 + state->U_.rows(), state->U_.cols());
+  U_new.bottomRows(state->U_.rows()) = state->U_;
+  U_new.block(0, state->imu->v()->id(), 3, 3) = sigma * Mat3::Identity();
+  efficient_QR(U_new);
+  state->U_ = U_new.topLeftCorner(state->U_.cols(), state->U_.cols())
+                  .triangularView<Eigen::Upper>();
+}
+
 void StateHelper::update_llt(std::shared_ptr<State> state, bool is_iterative) {
   // Skip if no update is required
   if (state->R_sqrt_inv_H_UT_.rows() == 0)
@@ -700,6 +736,14 @@ void StateHelper::initialize_state(std::shared_ptr<State> state,
     }
   }
 
+  // Calibrate sun alignment 
+  if (state->options.do_calib_sun_align) {
+    state->calib_sun_align_yaw->set_local_id(current_id);
+    state->variables_.push_back(state->calib_sun_align_yaw);
+    current_id += state->calib_sun_align_yaw->size();
+  }
+  assert(current_id == state->kCloneStartId);
+
   // Finally initialize our covariance to large value
   state->U_ = MatX::Zero(current_id, current_id);
   MatX U_imu_init = MatX::Identity(15, 15);
@@ -725,6 +769,12 @@ void StateHelper::initialize_state(std::shared_ptr<State> state,
     auto calib_dt_CAMtoIMU = state->calib_dt_CAMtoIMU;
     state->U_(calib_dt_CAMtoIMU->id(), calib_dt_CAMtoIMU->id()) =
         state->init_options.init_prior_t;
+  }
+
+  if (state->options.do_calib_sun_align) {
+    auto calib_sun_align_yaw = state->calib_sun_align_yaw;
+    state->U_(calib_sun_align_yaw->id(), calib_sun_align_yaw->id()) =
+        state->init_options.init_prior_sun_align;
   }
 
   if (state->options.do_calib_camera_pose) {
