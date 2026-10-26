@@ -262,9 +262,11 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   // A linearized 2-DOF update cannot walk in from an arbitrary heading: the
   // chi2 gate sees the curvature of the measurement function as inconsistency
   // and rejects everything beyond a few degrees. So when the yaw starts out
-  // genuinely unknown, solve it outright from the first reading.
-  if (state->options.do_calib_sun_align && init_align_from_first_reading_ &&
-      !align_initialized_) {
+  // genuinely unknown, solve it outright from the first reading. With
+  // init_heading the solved yaw turns G onto ENU instead of being recorded.
+  const bool solve_align =
+      state->options.do_calib_sun_align && init_align_from_first_reading_;
+  if ((init_heading_ || solve_align) && !align_initialized_) {
     const Vec3 s_meas = angles_to_unit_vector(best.alpha, best.beta);
     // The measured sun direction, carried back into G
     const Vec3 v = state->imu->Rot().transpose() * (R_ItoS_.transpose() * s_meas);
@@ -273,19 +275,25 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
     const DataType psi_solved =
         wrap_pi(std::atan2(v(1), v(0)) - std::atan2(s_ENU(1), s_ENU(0)));
 
+    // u_G = rot_z(psi) * s_ENU, so turning G by -psi leaves G = ENU
+    if (init_heading_)
+      StateHelper::rotate_global_yaw(state, -psi_solved);
+
     VecX psi_vec(1);
-    psi_vec(0) = psi_solved;
+    psi_vec(0) = init_heading_ ? 0.0 : psi_solved;
     state->calib_sun_align_yaw->set_value(psi_vec);
     state->calib_sun_align_yaw->set_fej(psi_vec);
     align_initialized_ = true;
     last_used_timestamp_ = best.timestamp;
+    // evalctl finds the start of the sun statistics by this line's prefix
     PRINT_INFO(CYAN "[SUN]: initialized the G-to-ENU yaw at %.4f deg from the "
-                    "reading at %.6f (elevation mismatch %.3f deg)\n" RESET,
+                    "reading at %.6f (elevation mismatch %.3f deg)%s\n" RESET,
                psi_solved * 180.0 / M_PI, best.timestamp,
                (std::asin(std::max((DataType)-1.0,
                                    std::min((DataType)1.0, v(2)))) -
                 sun_elevation_rad) *
-                   180.0 / M_PI);
+                   180.0 / M_PI,
+               init_heading_ ? " and turned G onto ENU" : "");
     return false;
   }
 
