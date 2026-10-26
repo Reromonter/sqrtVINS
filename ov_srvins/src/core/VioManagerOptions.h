@@ -246,6 +246,10 @@ struct VioManagerOptions {
   /// gate (s, 0 = never)
   double leg_recover_after_s = 1.0;
 
+  /// Apply the leg update before the visual update of each frame instead of
+  /// after it, so the features are gated against a leg-corrected velocity
+  bool leg_before_visual = false;
+
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 
