@@ -246,6 +246,12 @@ struct VioManagerOptions {
   /// gate (s, 0 = never)
   double leg_recover_after_s = 1.0;
 
+  /// Apply the leg update before the visual update of each frame instead of
+  /// after it, so the features are gated against a leg-corrected velocity.
+  /// On by default: it targets the visual lock-out after IMU-only drift; on
+  /// the BWL replays both orders were within the repeat-to-repeat spread.
+  bool leg_before_visual = true;
+
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 

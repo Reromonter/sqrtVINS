@@ -262,11 +262,12 @@ VioManager::VioManager(VioManagerOptions &params_)
     // INFO: proves in the run log which update actually ran
     PRINT_INFO("[LEG]: velocity update on (%s): sigma %.3f m/s, window "
                "+-%.3f s, stance share %.2f/%.2f, chi2 x%.1f, scale %.3f, "
-               "recover after %.1f s\n",
+               "recover after %.1f s, %s the visual update\n",
                params.leg_mechanism_file.c_str(), params.leg_sigma_v,
                params.leg_half_window_s, params.leg_share_on,
                params.leg_share_off, params.leg_options.chi2_multipler,
-               params.leg_velocity_scale, params.leg_recover_after_s);
+               params.leg_velocity_scale, params.leg_recover_after_s,
+               params.leg_before_visual ? "before" : "after");
   }
 }
 
@@ -547,6 +548,18 @@ void VioManager::do_feature_propagate_update(
   // Firstly marginalize the oldest clone if needed
   StateHelper::marginalize_old_clone(state);
   StateHelper::marginalize(state);
+
+  // Leg velocity update before the visual one (up_leg_before_visual): the
+  // features are then gated against a velocity the legs already corrected.
+  // It moves the clones through their correlations, so the camera poses the
+  // visual update reads are recomputed.
+  if (updaterLeg != nullptr && params.leg_before_visual &&
+      updaterLeg->try_update(state, state->timestamp)) {
+    state->calculate_clone_poses();
+    if (state->options.do_fej) {
+      state->calculate_clone_poses_fej();
+    }
+  }
   rT4 = boost::posix_time::microsec_clock::local_time();
 
   // Now, lets get all features that should be used for an update that are lost
@@ -776,7 +789,7 @@ void VioManager::do_feature_propagate_update(
   }
 
   // Leg velocity update, on the state the visual update just produced
-  if (updaterLeg != nullptr) {
+  if (updaterLeg != nullptr && !params.leg_before_visual) {
     updaterLeg->try_update(state, state->timestamp);
   }
 

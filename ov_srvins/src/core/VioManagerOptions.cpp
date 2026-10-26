@@ -110,6 +110,7 @@ void VioManagerOptions::print_and_load_estimator(
     parser->parse_config("up_leg_velocity_scale", leg_velocity_scale, false);
     parser->parse_config("up_leg_max_age_s", leg_max_age_s, false);
     parser->parse_config("up_leg_recover_after_s", leg_recover_after_s, false);
+    parser->parse_config("up_leg_before_visual", leg_before_visual, false);
     if (try_leg_velocity && !leg_mechanism_file.empty() &&
         leg_mechanism_file.front() != '/')
       leg_mechanism_file = parser->get_config_folder() + leg_mechanism_file;
@@ -153,6 +154,7 @@ void VioManagerOptions::print_and_load_estimator(
   PRINT_DEBUG("  - up_leg_velocity_scale: %.3f\n", leg_velocity_scale);
   PRINT_DEBUG("  - up_leg_max_age_s: %.2f\n", leg_max_age_s);
   PRINT_DEBUG("  - up_leg_recover_after_s: %.2f\n", leg_recover_after_s);
+  PRINT_DEBUG("  - up_leg_before_visual: %d\n", leg_before_visual);
   PRINT_DEBUG("  - record timing?: %d\n", (int)record_timing_information);
   PRINT_DEBUG("  - record timing filepath: %s\n",
               record_timing_filepath.c_str());
