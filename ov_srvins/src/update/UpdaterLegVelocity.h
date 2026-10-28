@@ -172,8 +172,15 @@ protected:
   /// Periodic statistics, printed every kStatsPeriod of state time
   void report(double timestamp);
   double stats_since_ = -1;
-  int n_updates_ = 0, n_no_data_ = 0, n_legs_accepted_ = 0,
+  int n_updates_ = 0, n_no_data_ = 0, n_no_gyro_ = 0, n_legs_accepted_ = 0,
       n_legs_rejected_ = 0, n_fk_failed_ = 0, n_recoveries_ = 0;
+
+  /// DEBUG trace of how far try_update gets, printed at most once per second
+  /// of state time; counters accumulate between prints (dbg_fed_ under raw_mtx_)
+  void debug_print(double timestamp, const char *stage, const char *fmt, ...);
+  int dbg_fed_ = 0, dbg_processed_ = 0, dbg_old_ = 0, dbg_bad_size_ = 0,
+      dbg_calls_ = 0;
+  double dbg_last_print_ = -1;
 };
 
 } // namespace ov_srvins

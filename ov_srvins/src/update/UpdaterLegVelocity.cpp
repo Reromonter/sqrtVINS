@@ -37,6 +37,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 
 using namespace ov_srvins;
 using namespace ov_core;
@@ -68,6 +70,7 @@ void UpdaterLegVelocity::feed_joint_state(const JointStateData &message,
                                           double oldest_time) {
   std::lock_guard<std::mutex> lck(raw_mtx_);
   raw_.push_back(message);
+  dbg_fed_++;
   // Nothing consumes the queue before the filter is initialized
   while (oldest_time > 0 && !raw_.empty() &&
          raw_.front().timestamp < oldest_time)
@@ -87,8 +90,10 @@ void UpdaterLegVelocity::process_new_samples(const Vec3 &up_B) {
   const LegKinematics::V3 p_BinI = params_.p_BinI.cast<double>();
   const LegKinematics::V3 up = up_B.cast<double>();
   for (const auto &msg : fresh) {
-    if (!samples_.empty() && msg.timestamp <= samples_.back().timestamp)
+    if (!samples_.empty() && msg.timestamp <= samples_.back().timestamp) {
+      dbg_old_++;
       continue;
+    }
     if (!names_ok_) {
       joint_index_.assign(motors.size(), -1);
       for (size_t m = 0; m < motors.size(); m++) {
@@ -108,8 +113,11 @@ void UpdaterLegVelocity::process_new_samples(const Vec3 &up_B) {
     }
     const size_t n = msg.names.size();
     if (msg.position.size() != n || msg.velocity.size() != n ||
-        msg.effort.size() != n)
+        msg.effort.size() != n) {
+      dbg_bad_size_++;
       continue; // the leg update needs angles, rates and torques
+    }
+    dbg_processed_++;
 
     Eigen::Matrix<double, LegKinematics::kMotors, 1> q, dq, tau;
     for (int m = 0; m < LegKinematics::kMotors; m++) {
@@ -166,6 +174,7 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   const Mat3 R_GtoI = state->imu->Rot();
   const Vec3 up_B = params_.R_BtoI.transpose() * R_GtoI * Vec3(0, 0, 1);
   process_new_samples(up_B);
+  dbg_calls_++;
 
   // The window, on the joint clock (= IMU clock + time_offset_s)
   const double t_imu = timestamp + state->calib_dt_CAMtoIMU->value()(0);
@@ -174,6 +183,10 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   if (samples_.empty() || samples_.back().timestamp < tc - params_.max_age_s ||
       samples_.back().timestamp < tc - w) {
     n_no_data_++;
+    debug_print(timestamp, "STOP no recent joint sample",
+                "newest sample - frame %+.3f s (needs >= %+.3f)",
+                samples_.empty() ? NAN : samples_.back().timestamp - tc,
+                -std::min(w, (double)params_.max_age_s));
     report(timestamp);
     return false;
   }
@@ -197,10 +210,28 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
       vrel[leg] += s.vrel_I[leg];
     }
   }
-  Vec3 w_mean;
-  if (n < 3 || !gyro_ || !gyro_(lo - params_.time_offset_s,
-                                hi - params_.time_offset_s, w_mean)) {
+  if (n < 3) {
     n_no_data_++;
+    debug_print(timestamp, "STOP too few samples in window",
+                "%d samples in [%+.3f, %+.3f] s around the frame", n, lo - tc,
+                hi - tc);
+    report(timestamp);
+    return false;
+  }
+  // The joint stream can run a few ms ahead of the IMU buffer; the IMU always
+  // covers the frame time (the frame is processed once the IMU has passed it)
+  Vec3 w_mean;
+  const bool gyro_full =
+      gyro_ && gyro_(lo - params_.time_offset_s, hi - params_.time_offset_s,
+                     w_mean);
+  if (!gyro_full &&
+      (!gyro_ || !gyro_(lo - params_.time_offset_s,
+                        std::min(hi, tc) - params_.time_offset_s, w_mean))) {
+    n_no_gyro_++;
+    debug_print(timestamp, "STOP no gyro over window",
+                "IMU does not cover [%+.3f, %+.3f] s nor [%+.3f, %+.3f] s "
+                "around the frame",
+                lo - tc, hi - tc, lo - tc, std::min(hi, tc) - tc);
     report(timestamp);
     return false;
   }
@@ -239,6 +270,11 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   }
   last_residuals_ = res;
   if (legs.empty()) {
+    debug_print(timestamp, "STOP no leg in stance",
+                "stance samples per leg %d %d %d %d of %d (need %.0f), gyro %s",
+                n_stance[0], n_stance[1], n_stance[2], n_stance[3], n,
+                params_.min_stance_fraction * n,
+                gyro_full ? "full" : "fallback");
     report(timestamp);
     return false;
   }
@@ -293,6 +329,9 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
       inconsistent_since_ = -1;
       n_recoveries_++;
     }
+    debug_print(timestamp, "STOP every stance leg failed the gate",
+                "%zu stance legs, first residual %.3f m/s", legs.size(),
+                (double)res[0].norm());
     report(timestamp);
     return false;
   }
@@ -323,8 +362,36 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   last_accepted_ = (int)accepted.size();
   n_legs_accepted_ += last_accepted_;
   n_updates_++;
+  debug_print(timestamp, "OK update applied",
+              "%d legs accepted, %d rejected, %d samples, gyro %s",
+              last_accepted_, last_rejected_, n,
+              gyro_full ? "full" : "fallback");
   report(timestamp);
   return true;
+}
+
+void UpdaterLegVelocity::debug_print(double timestamp, const char *stage,
+                                     const char *fmt, ...) {
+  if (dbg_last_print_ >= 0 && timestamp - dbg_last_print_ < 1.0)
+    return;
+  char detail[256];
+  va_list args;
+  va_start(args, fmt);
+  std::vsnprintf(detail, sizeof(detail), fmt, args);
+  va_end(args);
+  int fed;
+  {
+    std::lock_guard<std::mutex> lck(raw_mtx_);
+    fed = dbg_fed_;
+    dbg_fed_ = 0;
+  }
+  PRINT_INFO("[LEG-DBG]: %s | %s | since last: %d calls, %d msgs fed, %d "
+             "processed, %d out of order, %d missing vel/effort, %zu samples "
+             "held\n",
+             stage, detail, dbg_calls_, fed, dbg_processed_, dbg_old_,
+             dbg_bad_size_, samples_.size());
+  dbg_last_print_ = timestamp;
+  dbg_calls_ = dbg_processed_ = dbg_old_ = dbg_bad_size_ = 0;
 }
 
 void UpdaterLegVelocity::report(double timestamp) {
@@ -334,10 +401,11 @@ void UpdaterLegVelocity::report(double timestamp) {
     return;
   PRINT_INFO(CYAN "[LEG]: last %.0f s: %d updates, %d legs applied, %d "
                   "rejected by the gate, %d frames without joint data, %d "
-                  "leg solves failed, %d recoveries\n" RESET,
+                  "without gyro, %d leg solves failed, %d recoveries\n" RESET,
              timestamp - stats_since_, n_updates_, n_legs_accepted_,
-             n_legs_rejected_, n_no_data_, n_fk_failed_, n_recoveries_);
+             n_legs_rejected_, n_no_data_, n_no_gyro_, n_fk_failed_,
+             n_recoveries_);
   stats_since_ = timestamp;
-  n_updates_ = n_no_data_ = n_legs_accepted_ = n_legs_rejected_ =
+  n_updates_ = n_no_data_ = n_no_gyro_ = n_legs_accepted_ = n_legs_rejected_ =
       n_fk_failed_ = n_recoveries_ = 0;
 }
