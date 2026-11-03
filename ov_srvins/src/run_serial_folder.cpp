@@ -34,6 +34,10 @@
 //   traj_update.txt  TUM poses after each processed frame (like /poseimu)
 //   frames.csv       one row per frame that passed the track_frequency throttle
 //   tracks.csv       tracked features after each frame (--dump_tracks 1)
+//
+// --init_rate R throttles at R Hz until the system is initialized and at
+// track_frequency afterwards, so a sparse rate can be tested without starving
+// the initializer. --start_s S skips the first S seconds of the folder.
 
 #include <time.h>
 
@@ -102,7 +106,7 @@ int main(int argc, char **argv) {
   if (argc < 4) {
     PRINT_ERROR(RED "usage: run_serial_folder <config.yaml> <data_dir> "
                     "<out_dir> [--odom_rate 20] [--dump_tracks 1] "
-                    "[--max_time_s -1]\n" RESET);
+                    "[--max_time_s -1] [--init_rate -1] [--start_s 0]\n" RESET);
     return EXIT_FAILURE;
   }
   std::string config_path = argv[1];
@@ -111,6 +115,8 @@ int main(int argc, char **argv) {
   double odom_rate = 20.0;
   bool dump_tracks = true;
   double max_time_s = -1;
+  double init_rate = -1;
+  double start_s = 0;
   for (int i = 4; i + 1 < argc; i += 2) {
     std::string key = argv[i];
     if (key == "--odom_rate")
@@ -119,6 +125,10 @@ int main(int argc, char **argv) {
       dump_tracks = std::stoi(argv[i + 1]) != 0;
     else if (key == "--max_time_s")
       max_time_s = std::stod(argv[i + 1]);
+    else if (key == "--init_rate")
+      init_rate = std::stod(argv[i + 1]);
+    else if (key == "--start_s")
+      start_s = std::stod(argv[i + 1]);
     else {
       PRINT_ERROR(RED "unknown option %s\n" RESET, key.c_str());
       return EXIT_FAILURE;
@@ -197,7 +207,6 @@ int main(int argc, char **argv) {
   // Replay: images pass the same time throttle as ROS2Visualizer, wait in a
   // queue and are processed once an IMU sample is newer than them
   const double t_first = imu.front().timestamp;
-  const double time_delta = 1.0 / params.track_frequency;
   double camera_last_timestamp = -1;
   double last_odom_t = -1;
   std::deque<ov_core::CameraData> camera_queue;
@@ -205,6 +214,12 @@ int main(int argc, char **argv) {
   size_t i_frame = 0;
   double cpu_total = 0, wall_start = wall_now();
   for (const auto &m : imu) {
+    if (m.timestamp - t_first < start_s) {
+      while (i_frame < frames.size() &&
+             frames.at(i_frame).t_ns * 1e-9 <= m.timestamp)
+        i_frame++;
+      continue;
+    }
     if (max_time_s > 0 && m.timestamp - t_first > max_time_s)
       break;
 
@@ -213,6 +228,10 @@ int main(int argc, char **argv) {
            frames.at(i_frame).t_ns * 1e-9 <= m.timestamp) {
       const auto &fr = frames.at(i_frame++);
       double timestamp = fr.t_ns * 1e-9;
+      double rate = (init_rate > 0 && !sys->initialized())
+                        ? init_rate
+                        : params.track_frequency;
+      double time_delta = 1.0 / rate;
       if (camera_last_timestamp >= 0 &&
           timestamp < camera_last_timestamp + time_delta) {
         continue;
