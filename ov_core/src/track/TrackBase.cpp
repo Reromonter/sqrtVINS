@@ -299,3 +299,109 @@ void TrackBase::change_feat_id(size_t id_old, size_t id_new) {
     }
   }
 }
+std::vector<cv::Point2f> TrackBase::predict_points(
+    size_t cam_id, const std::vector<cv::KeyPoint> &pts,
+    const std::vector<size_t> &ids, int cam_other,
+    const std::vector<cv::KeyPoint> &pts_other,
+    const std::vector<size_t> &ids_other, std::vector<char> &has_pred,
+    int &num_stereo) {
+  std::vector<cv::Point2f> pred(pts.size());
+  has_pred.assign(pts.size(), 0);
+  num_stereo = 0;
+  std::unordered_map<size_t, size_t> index_other;
+  for (size_t i = 0; i < ids_other.size(); i++)
+    index_other[ids_other.at(i)] = i;
+  for (size_t i = 0; i < pts.size(); i++) {
+    pred.at(i) = pts.at(i).pt;
+    // known depth from the stereo pair (triangulated at the old time)
+    Eigen::Vector3d p_FinG;
+    bool have_3d = false;
+    auto it = index_other.find(ids.at(i));
+    if (cam_other >= 0 && it != index_other.end() &&
+        motion_prior.calib.count((size_t)cam_other)) {
+      cv::Point2f n_this = motion_prior.undistort(cam_id, pts.at(i).pt);
+      cv::Point2f n_other =
+          motion_prior.undistort((size_t)cam_other, pts_other.at(it->second).pt);
+      // the triangulation wants the pair in a fixed order (cam0, cam1)
+      have_3d = (cam_id < (size_t)cam_other)
+                    ? motion_prior.triangulate_stereo(cam_id, cam_other, false,
+                                                      n_this, n_other, p_FinG)
+                    : motion_prior.triangulate_stereo(cam_other, cam_id, false,
+                                                      n_other, n_this, p_FinG);
+    }
+    cv::Point2f uv;
+    if (motion_prior.predict(cam_id, pts.at(i).pt, have_3d ? &p_FinG : nullptr,
+                             uv)) {
+      pred.at(i) = uv;
+      has_pred.at(i) = 1;
+      num_stereo += have_3d ? 1 : 0;
+    }
+  }
+  return pred;
+}
+
+void TrackBase::log_prediction_error(double timestamp, size_t cam_id,
+                                     const std::vector<cv::Point2f> &pred,
+                                     const std::vector<char> &has_pred,
+                                     const std::vector<cv::KeyPoint> &final_pts,
+                                     const std::vector<uchar> &ok, int rows,
+                                     int num_stereo) {
+  std::vector<double> near, far;
+  for (size_t i = 0; i < pred.size() && i < final_pts.size() && i < ok.size();
+       i++) {
+    if (!has_pred.at(i) || !ok.at(i))
+      continue;
+    double err = cv::norm(final_pts.at(i).pt - pred.at(i));
+    (final_pts.at(i).pt.y < rows / 3.0 ? far : near).push_back(err);
+  }
+  auto pct = [](std::vector<double> v, double q) {
+    if (v.empty())
+      return -1.0;
+    size_t k = std::min(v.size() - 1, (size_t)(q * (double)v.size()));
+    std::nth_element(v.begin(), v.begin() + k, v.end());
+    return v.at(k);
+  };
+  PRINT_INFO("[PRED]: t=%.4f cam%zu stereo=%d | near n=%zu med=%.2f p90=%.2f "
+             "| far n=%zu med=%.2f p90=%.2f\n",
+             timestamp, cam_id, num_stereo, near.size(), pct(near, 0.5),
+             pct(near, 0.9), far.size(), pct(far, 0.5), pct(far, 0.9));
+}
+
+std::vector<bool> TrackBase::rigidity_check(
+    size_t cam0, size_t cam1, const std::vector<cv::Point2f> &uv0_old,
+    const std::vector<cv::Point2f> &uv1_old,
+    const std::vector<cv::Point2f> &uv0_new,
+    const std::vector<cv::Point2f> &uv1_new) {
+  std::vector<bool> keep(uv0_old.size(), false);
+  if (!motion_prior.calib.count(cam0) || !motion_prior.calib.count(cam1))
+    return std::vector<bool>(uv0_old.size(), true);
+  std::vector<cv::Point2f> n0_old, n1_old, n0_new, n1_new;
+  for (size_t i = 0; i < uv0_old.size(); i++) {
+    n0_old.push_back(motion_prior.undistort(cam0, uv0_old.at(i)));
+    n1_old.push_back(motion_prior.undistort(cam1, uv1_old.at(i)));
+    n0_new.push_back(motion_prior.undistort(cam0, uv0_new.at(i)));
+    n1_new.push_back(motion_prior.undistort(cam1, uv1_new.at(i)));
+  }
+  // only the extrinsics matter: triangulate in the IMU frame of each time
+  MotionPrior local = motion_prior;
+  local.R_GtoIold = local.R_GtoInew = Eigen::Matrix3d::Identity();
+  local.p_IoldinG = local.p_InewinG = Eigen::Vector3d::Zero();
+  std::vector<size_t> index;
+  std::vector<Eigen::Vector3d> p_old, p_new;
+  for (size_t i = 0; i < n0_old.size(); i++) {
+    Eigen::Vector3d a, b;
+    if (local.triangulate_stereo(cam0, cam1, false, n0_old.at(i),
+                                 n1_old.at(i), a) &&
+        local.triangulate_stereo(cam0, cam1, true, n0_new.at(i), n1_new.at(i),
+                                 b)) {
+      index.push_back(i);
+      p_old.push_back(a);
+      p_new.push_back(b);
+    }
+  }
+  std::vector<bool> inl =
+      rigidity_inliers(p_old, p_new, rigidity_abs_m, rigidity_rel);
+  for (size_t k = 0; k < index.size(); k++)
+    keep.at(index.at(k)) = inl.at(k);
+  return keep;
+}

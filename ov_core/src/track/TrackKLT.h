@@ -162,12 +162,19 @@ protected:
    * specify which points are good or bad. If the second vector is non-empty, it
    * will be used as an initial guess of where the keypoints are in the second
    * image.
+   *
+   * With the PLANE outlier check and a prediction (pred / has_pred) the
+   * fundamental RANSAC is replaced by the distance to the prediction. With
+   * mask_klt the bare KLT success flags are returned too (for RIGIDITY).
    */
   void perform_matching(const std::vector<cv::Mat> &img0pyr,
                         const std::vector<cv::Mat> &img1pyr,
                         std::vector<cv::KeyPoint> &pts0,
                         std::vector<cv::KeyPoint> &pts1, size_t id0, size_t id1,
-                        std::vector<uchar> &mask_out);
+                        std::vector<uchar> &mask_out,
+                        const std::vector<cv::Point2f> *pred = nullptr,
+                        const std::vector<char> *has_pred = nullptr,
+                        std::vector<uchar> *mask_klt_out = nullptr);
 
   // Parameters for our FAST grid detector
   int threshold;

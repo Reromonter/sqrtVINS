@@ -33,6 +33,7 @@
 //                    clock at --odom_rate (what /odomimu publishes)
 //   traj_update.txt  TUM poses after each processed frame (like /poseimu)
 //   frames.csv       one row per frame that passed the track_frequency throttle
+//                    (status: VioManager::FrameStatus, overlap: keyframe overlap)
 //   tracks.csv       tracked features after each frame (--dump_tracks 1)
 //
 // --init_rate R throttles at R Hz until the system is initialized and at
@@ -198,7 +199,8 @@ int main(int argc, char **argv) {
   std::ofstream of_tracks;
   of_odom << "# t x y z qx qy qz qw\n";
   of_update << "# t x y z qx qy qz qw\n";
-  of_frames << "t_ns,wall_ms,cpu_ms,initialized,updated,clones,slam\n";
+  of_frames << "t_ns,wall_ms,cpu_ms,initialized,updated,clones,slam,status,"
+               "overlap\n";
   if (dump_tracks) {
     of_tracks.open((out_dir / "tracks.csv").string());
     of_tracks << "t_ns,cam,id,u,v\n";
@@ -281,7 +283,9 @@ int main(int argc, char **argv) {
                 << std::setprecision(3) << (w1 - w0) * 1e3 << ","
                 << (c1 - c0) * 1e3 << "," << (int)sys->initialized() << ","
                 << (int)updated << "," << state->clones_IMU.size() << ","
-                << state->features_SLAM.size() << "\n";
+                << state->features_SLAM.size() << ","
+                << sys->last_frame_status() << "," << std::setprecision(3)
+                << sys->last_frame_overlap() << "\n";
       if (updated) {
         double t_ItoC = state->calib_dt_CAMtoIMU->value()(0);
         Eigen::Matrix<DataType, 4, 1> q = state->imu->quat();

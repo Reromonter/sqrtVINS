@@ -152,6 +152,11 @@ public:
    */
   void store_update_factor(const MatX &R_sinv_H_UT, const VecX &R_inv_res);
 
+  // Rows still free in the update factor buffer
+  int free_update_rows() const {
+    return R_sqrt_inv_H_UT_.max_rows() - R_sqrt_inv_H_UT_.rows();
+  }
+
   /**
    * @brief Store the update jacobians for a new measurement
    * @param Hx Jacobian of measurement w.r.t. state

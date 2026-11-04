@@ -57,6 +57,9 @@
 #include "update/UpdaterZeroVelocity.h"
 #include "utils/ImagePreprocess.h"
 
+#include "cam/CamEqui.h"
+#include "cam/CamRadtan.h"
+
 using namespace ov_core;
 using namespace ov_type;
 using namespace ov_srvins;
@@ -93,6 +96,8 @@ VioManager::VioManager(VioManagerOptions &params_)
 
   // Loop through and load each of the cameras
   state->cam_intrinsics_cameras = params.camera_intrinsics;
+  for (const auto &cam : params.camera_intrinsics)
+    fixed_camera_values[cam.first] = cam.second->get_value();
   for (int i = 0; i < state->options.num_cameras; i++) {
     state->cam_intrinsics.at(i)->set_value(
         params.camera_intrinsics.at(i)->get_value());
@@ -153,6 +158,13 @@ VioManager::VioManager(VioManagerOptions &params_)
         params.histogram_method, params.fast_threshold, params.grid_x,
         params.grid_y, params.min_px_dist, params.knn_ratio));
   }
+
+  // Motion prior / outlier check options (pixels are given at full resolution)
+  trackFEATS->set_prior_options(
+      params.klt_use_prior, params.outlier_check,
+      params.plane_outlier_px * params.downsample_scale, params.rigidity_abs_m,
+      params.rigidity_rel,
+      params.desc_guided_radius_px * params.downsample_scale);
 
   // Initialize our aruco tag extractor
   if (params.use_aruco) {
@@ -326,6 +338,14 @@ void VioManager::track_image_and_update(
            message_const.sensor_ids.at(i + 1));
   }
 
+  // Keyframe modes B and motion drop the image before any processing
+  frame_status = FRAME_NONE;
+  frame_overlap = -1;
+  if (is_initialized_vio && skip_before_tracking(message_const)) {
+    frame_status = FRAME_SKIPPED;
+    return;
+  }
+
   // Blur and downsample if we are doing either
   ov_core::CameraData message = message_const;
   bool preprocess =
@@ -341,7 +361,9 @@ void VioManager::track_image_and_update(
   }
 
   // Perform our feature tracking!
+  update_motion_prior(message.timestamp);
   trackFEATS->feed_new_camera(message);
+  last_tracked_time = message.timestamp;
 
   // If the aruco tracker is available, the also pass to it
   // NOTE: binocular tracking for aruco doesn't make sense as we by default have
@@ -370,6 +392,7 @@ void VioManager::track_image_and_update(
           message.timestamp + state->calib_dt_CAMtoIMU->value()(0) - 0.10);
       updaterZUPT->clean_old_imu_measurements(
           message.timestamp + state->calib_dt_CAMtoIMU->value()(0) - 0.10);
+      frame_status = FRAME_ZUPT;
       return;
     }
   }
@@ -385,8 +408,273 @@ void VioManager::track_image_and_update(
     }
   }
 
+  // Keyframe mode A: a tracked image that is no keyframe gets no clone, and
+  // its measurements leave the database (the MSCKF only uses clone times)
+  if (params.keyframe_mode == VioManagerOptions::OVERLAP_TRACKED &&
+      !keyframe_after_tracking(message)) {
+    trackFEATS->get_feature_database()->cleanup_measurements_exact(
+        message.timestamp);
+    frame_status = FRAME_TRACKED;
+    return;
+  }
+
   // Call on our propagate and update function
   do_feature_propagate_update(message);
+  if (state->timestamp == message.timestamp) {
+    frame_status = FRAME_UPDATED;
+    bool prior_needed = params.klt_use_prior ||
+                        params.outlier_check == ov_core::TrackBase::PLANE ||
+                        params.desc_guided_radius_px > 0;
+    if (params.keyframe_mode != VioManagerOptions::TIME || prior_needed)
+      record_keyframe(message);
+  }
+}
+
+void VioManager::set_fixed_extrinsics(ov_core::MotionPrior &prior) {
+  // The calibrated extrinsics and intrinsics, not the online estimates: with
+  // calib_cam_extrinsics / _intrinsics the cameras drift apart while walking,
+  // which ruins stereo triangulation
+  for (const auto &ext : params.camera_extrinsics) {
+    Eigen::Matrix<double, 4, 1> q = ext.second.block(0, 0, 4, 1).cast<double>();
+    prior.R_ItoC[ext.first] = ov_core::quat_2_Rot(q);
+    prior.p_IinC[ext.first] = ext.second.block(4, 0, 3, 1).cast<double>();
+  }
+  if (fixed_cameras.empty()) {
+    for (const auto &cam : state->cam_intrinsics_cameras) {
+      std::shared_ptr<ov_core::CamBase> copy;
+      if (std::dynamic_pointer_cast<ov_core::CamEqui>(cam.second) != nullptr)
+        copy = std::make_shared<ov_core::CamEqui>(cam.second->w(),
+                                                  cam.second->h());
+      else
+        copy = std::make_shared<ov_core::CamRadtan>(cam.second->w(),
+                                                    cam.second->h());
+      copy->set_value(fixed_camera_values.at(cam.first));
+      fixed_cameras[cam.first] = copy;
+    }
+  }
+  prior.calib = fixed_cameras;
+}
+
+bool VioManager::predict_imu_pose(double timestamp, Eigen::Matrix3d &R_GtoI,
+                                  Eigen::Vector3d &p_IinG) {
+  if (std::abs(timestamp - state->timestamp) < 1e-9) {
+    R_GtoI = state->imu->Rot().cast<double>();
+    p_IinG = state->imu->pos().cast<double>();
+    return true;
+  }
+  if (timestamp < state->timestamp)
+    return false;
+  Eigen::Matrix<DataType, 13, 1> state_plus;
+  Eigen::Matrix<DataType, 12, 12> cov_plus;
+  if (!propagator->fast_state_propagate(state, timestamp, state_plus,
+                                        cov_plus))
+    return false;
+  Vec4 q = state_plus.block(0, 0, 4, 1);
+  R_GtoI = ov_core::quat_2_Rot(q).cast<double>();
+  p_IinG = state_plus.block(4, 0, 3, 1).cast<double>();
+  return R_GtoI.allFinite() && p_IinG.allFinite();
+}
+
+void VioManager::update_motion_prior(double timestamp) {
+  bool prior_needed = params.klt_use_prior ||
+                      params.outlier_check == ov_core::TrackBase::PLANE ||
+                      params.desc_guided_radius_px > 0;
+  if (!prior_needed && params.outlier_check != ov_core::TrackBase::RIGIDITY)
+    return;
+  ov_core::MotionPrior prior;
+  set_fixed_extrinsics(prior);
+  if (prior_needed && is_initialized_vio && last_tracked_time > 0 &&
+      predict_imu_pose(last_tracked_time, prior.R_GtoIold, prior.p_IoldinG) &&
+      predict_imu_pose(timestamp, prior.R_GtoInew, prior.p_InewinG)) {
+    prior.valid = true;
+    prior.timestamp_old = last_tracked_time;
+    prior.timestamp_new = timestamp;
+    prior.has_plane = ground_valid;
+    prior.n_G = ground_n_G;
+    prior.d_G = ground_d_G;
+  }
+  trackFEATS->set_motion_prior(prior);
+}
+
+bool VioManager::skip_before_tracking(const ov_core::CameraData &message) {
+  if (params.keyframe_mode != VioManagerOptions::OVERLAP_PREDICTED &&
+      params.keyframe_mode != VioManagerOptions::MOTION)
+    return false;
+  if (keyframe_time < 0 ||
+      message.timestamp - keyframe_time >= params.keyframe_max_dt)
+    return false;
+  Eigen::Matrix3d R_GtoI;
+  Eigen::Vector3d p_IinG;
+  if (!predict_imu_pose(message.timestamp, R_GtoI, p_IinG))
+    return false;
+
+  if (params.keyframe_mode == VioManagerOptions::MOTION) {
+    // distance and heading change (about gravity) since the keyframe
+    double dist = (p_IinG - keyframe_p_IinG).norm();
+    Eigen::Matrix3d R_rel = R_GtoI.transpose() * keyframe_R_GtoI;
+    double yaw = std::abs(std::atan2(R_rel(1, 0), R_rel(0, 0))) * 180.0 / M_PI;
+    return dist < params.trigger_dist && yaw < params.trigger_yaw;
+  }
+
+  // Mode B: share of the keyframe's ground samples inside the predicted view
+  ov_core::MotionPrior prior;
+  set_fixed_extrinsics(prior);
+  prior.R_GtoInew = R_GtoI;
+  prior.p_InewinG = p_IinG;
+  Eigen::Matrix3d R_GtoC;
+  Eigen::Vector3d p_CinG;
+  prior.camera_pose(0, true, R_GtoC, p_CinG);
+  auto calib = prior.calib.at(0);
+  int inside = 0;
+  for (size_t i = 0; i < keyframe_samples_G.size(); i++) {
+    Eigen::Vector3d p_C =
+        keyframe_samples_at_inf.at(i)
+            ? Eigen::Vector3d(R_GtoC * keyframe_samples_G.at(i))
+            : Eigen::Vector3d(R_GtoC * (keyframe_samples_G.at(i) - p_CinG));
+    if (p_C(2) < 0.05)
+      continue;
+    cv::Point2f uv = calib->distort(
+        cv::Point2f((float)(p_C(0) / p_C(2)), (float)(p_C(1) / p_C(2))));
+    if (uv.x >= 0 && uv.y >= 0 && uv.x < calib->w() && uv.y < calib->h())
+      inside++;
+  }
+  frame_overlap = keyframe_samples_G.empty()
+                      ? 0.0
+                      : (double)inside / (double)keyframe_samples_G.size();
+  return frame_overlap >= params.keyframe_overlap_min;
+}
+
+bool VioManager::keyframe_after_tracking(const ov_core::CameraData &message) {
+  if (keyframe_time < 0 || keyframe_cells.empty() ||
+      message.timestamp - keyframe_time >= params.keyframe_max_dt)
+    return true;
+  auto ids = trackFEATS->get_last_ids();
+  std::set<size_t> alive(ids[0].begin(), ids[0].end());
+  int live_cells = 0;
+  for (const auto &cell : keyframe_cells) {
+    for (size_t id : cell.second) {
+      if (alive.count(id)) {
+        live_cells++;
+        break;
+      }
+    }
+  }
+  frame_overlap = (double)live_cells / (double)keyframe_cells.size();
+  return frame_overlap < params.keyframe_overlap_min;
+}
+
+void VioManager::fit_ground_plane() {
+  // Camera 0 at the current state
+  ov_core::MotionPrior local;
+  set_fixed_extrinsics(local);
+  local.R_GtoIold = state->imu->Rot().cast<double>();
+  local.p_IoldinG = state->imu->pos().cast<double>();
+  Eigen::Matrix3d R_GtoC0;
+  Eigen::Vector3d p_C0inG;
+  local.camera_pose(0, false, R_GtoC0, p_C0inG);
+
+  bool ok = false;
+  int inliers = 0, num_points = 0;
+  Eigen::Vector3d n = Eigen::Vector3d::UnitZ();
+  double d = 0;
+  if (params.ground_plane_source == VioManagerOptions::GROUND_STEREO &&
+      state->options.num_cameras > 1) {
+    // Stereo points of the last tracked image within 3 m of cam0
+    auto obs = trackFEATS->get_last_obs();
+    auto ids = trackFEATS->get_last_ids();
+    std::map<size_t, size_t> index1;
+    for (size_t i = 0; i < ids[1].size(); i++)
+      index1[ids[1].at(i)] = i;
+    std::vector<Eigen::Vector3d> points;
+    for (size_t i = 0; i < ids[0].size(); i++) {
+      auto it = index1.find(ids[0].at(i));
+      if (it == index1.end())
+        continue;
+      Eigen::Vector3d p_FinG;
+      cv::Point2f n0 = local.undistort(0, obs[0].at(i).pt);
+      cv::Point2f n1 = local.undistort(1, obs[1].at(it->second).pt);
+      if (local.triangulate_stereo(0, 1, false, n0, n1, p_FinG, 3.0))
+        points.push_back(p_FinG);
+    }
+    num_points = (int)points.size();
+    ok = ov_core::fit_ground_plane(points, Eigen::Vector3d::UnitZ(), 20.0,
+                                   0.03, 15, n, d, inliers);
+    double height = n.dot(p_C0inG) - d;
+    ok = ok && height > 0.15 && height < 1.5;
+  }
+  if (!ok) {
+    n = Eigen::Vector3d::UnitZ();
+    d = p_C0inG(2) - params.ground_cam_height;
+  }
+  ground_valid = true;
+  ground_n_G = n;
+  ground_d_G = d;
+  PRINT_INFO("[GROUND]: t=%.4f src=%s h=%.3f points=%d inliers=%d "
+             "tilt=%.1f\n",
+             state->timestamp, ok ? "stereo" : "fixed", n.dot(p_C0inG) - d,
+             num_points, inliers,
+             std::acos(std::min(1.0, n(2))) * 180.0 / M_PI);
+}
+
+void VioManager::record_keyframe(const ov_core::CameraData &message) {
+  double dt = keyframe_time < 0 ? -1 : state->timestamp - keyframe_time;
+  double dist = keyframe_time < 0
+                    ? -1
+                    : (state->imu->pos().cast<double>() - keyframe_p_IinG).norm();
+  keyframe_time = state->timestamp;
+  keyframe_R_GtoI = state->imu->Rot().cast<double>();
+  keyframe_p_IinG = state->imu->pos().cast<double>();
+  fit_ground_plane();
+
+  // Mode A: which live tracks sit in which grid cell of cam0
+  if (params.keyframe_mode == VioManagerOptions::OVERLAP_TRACKED) {
+    keyframe_cells.clear();
+    auto obs = trackFEATS->get_last_obs();
+    auto ids = trackFEATS->get_last_ids();
+    auto calib = state->cam_intrinsics_cameras.at(0);
+    for (size_t i = 0; i < obs[0].size() && i < ids[0].size(); i++) {
+      int cx = std::min(params.keyframe_grid_x - 1,
+                        std::max(0, (int)(obs[0].at(i).pt.x * params.keyframe_grid_x /
+                                          calib->w())));
+      int cy = std::min(params.keyframe_grid_y - 1,
+                        std::max(0, (int)(obs[0].at(i).pt.y * params.keyframe_grid_y /
+                                          calib->h())));
+      keyframe_cells[cy * params.keyframe_grid_x + cx].insert(ids[0].at(i));
+    }
+  }
+
+  // Mode B: ground points of a sample grid over the unmasked cam0 image
+  if (params.keyframe_mode == VioManagerOptions::OVERLAP_PREDICTED) {
+    keyframe_samples_G.clear();
+    keyframe_samples_at_inf.clear();
+    ov_core::MotionPrior local;
+    set_fixed_extrinsics(local);
+    local.R_GtoIold = keyframe_R_GtoI;
+    local.p_IoldinG = keyframe_p_IinG;
+    local.has_plane = ground_valid;
+    local.n_G = ground_n_G;
+    local.d_G = ground_d_G;
+    auto calib = local.calib.at(0);
+    const cv::Mat &mask = message.masks.at(0);
+    const int nx = 16, ny = 10;
+    for (int iy = 0; iy < ny; iy++) {
+      for (int ix = 0; ix < nx; ix++) {
+        cv::Point2f uv((ix + 0.5f) * calib->w() / nx,
+                       (iy + 0.5f) * calib->h() / ny);
+        if (!mask.empty() && mask.at<uint8_t>((int)uv.y, (int)uv.x) > 127)
+          continue;
+        Eigen::Vector3d origin, dir, p_FinG;
+        if (!local.ray_in_global(0, false, local.undistort(0, uv), origin,
+                                 dir))
+          continue;
+        bool hit = local.intersect_plane(origin, dir, p_FinG);
+        keyframe_samples_G.push_back(hit ? p_FinG : dir);
+        keyframe_samples_at_inf.push_back(!hit);
+      }
+    }
+  }
+  PRINT_INFO("[KF]: t=%.4f dt=%.3f dist=%.3f overlap=%.3f\n", keyframe_time,
+             dt, dist, frame_overlap);
 }
 
 void VioManager::feed_measurement_simulation(
@@ -621,6 +909,11 @@ void VioManager::do_feature_propagate_update(
 
   // Find tracks that have reached max length, these can be made into SLAM
   // features
+  // slam_min_track_len lowers the length a track needs (upstream:
+  // max_clones + 1 measurements)
+  int slam_min_len = (params.slam_min_track_len > 0)
+                         ? params.slam_min_track_len
+                         : state->options.max_clone_size + 1;
   std::vector<std::shared_ptr<Feature>> feats_maxtracks;
   auto it2 = feats_marg.begin();
   while (it2 != feats_marg.end()) {
@@ -628,7 +921,7 @@ void VioManager::do_feature_propagate_update(
     bool reached_max = false;
     for (const auto &cams : (*it2)->timestamps) {
       // Add one here to match openvins logic
-      if ((int)cams.second.size() > state->options.max_clone_size) {
+      if ((int)cams.second.size() >= slam_min_len) {
         reached_max = true;
         break;
       }
@@ -673,6 +966,43 @@ void VioManager::do_feature_propagate_update(
                         feats_maxtracks.end());
       feats_maxtracks.erase(feats_maxtracks.end() - valid_amount,
                             feats_maxtracks.end());
+    }
+
+    // slam_min_track_len: tracks that are still alive and long enough also
+    // qualify (with sparse keyframes few tracks reach the oldest clone). The
+    // ones not taken stay in the database untouched.
+    amount_to_add -= valid_amount;
+    if (params.slam_min_track_len > 0 && amount_to_add > 0) {
+      std::vector<std::shared_ptr<Feature>> feats_young;
+      for (const auto &feat :
+           trackFEATS->get_feature_database()->features_containing(
+               state->timestamp, false, true)) {
+        if (state->features_SLAM.find(feat->featid) !=
+                state->features_SLAM.end() ||
+            std::find(feats_slam.begin(), feats_slam.end(), feat) !=
+                feats_slam.end() ||
+            std::find(feats_marg.begin(), feats_marg.end(), feat) !=
+                feats_marg.end() ||
+            std::find(feats_maxtracks.begin(), feats_maxtracks.end(), feat) !=
+                feats_maxtracks.end())
+          continue;
+        for (const auto &cams : feat->timestamps) {
+          if ((int)cams.second.size() >= slam_min_len) {
+            feats_young.push_back(feat);
+            break;
+          }
+        }
+      }
+      std::sort(feats_young.begin(), feats_young.end(),
+                [](const std::shared_ptr<Feature> &a,
+                   const std::shared_ptr<Feature> &b) {
+                  return a->timestamps.begin()->second.size() >
+                         b->timestamps.begin()->second.size();
+                });
+      if ((int)feats_young.size() > amount_to_add)
+        feats_young.resize(amount_to_add);
+      feats_slam.insert(feats_slam.end(), feats_young.begin(),
+                        feats_young.end());
     }
   }
 

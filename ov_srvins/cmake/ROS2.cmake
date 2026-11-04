@@ -140,6 +140,8 @@ if (BUILD_TESTING)
     target_link_libraries(test_sun_sensor_update ov_srvins_lib ${thirdparty_libraries})
     ament_add_gtest(test_leg_velocity test/test_leg_velocity.cpp)
     target_link_libraries(test_leg_velocity ov_srvins_lib ${thirdparty_libraries})
+    ament_add_gtest(test_motion_prior test/test_motion_prior.cpp)
+    target_link_libraries(test_motion_prior ov_srvins_lib ${thirdparty_libraries})
     target_compile_definitions(test_leg_velocity PRIVATE
             LEG_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
 endif ()

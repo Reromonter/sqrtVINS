@@ -41,6 +41,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/opencv.hpp>
 
+#include "track/MotionPrior.h"
 #include "utils/colors.h"
 #include "utils/print.h"
 #include "utils/sensor_data.h"
@@ -93,6 +94,17 @@ public:
    * @brief Desired pre-processing image method.
    */
   enum HistogramMethod { NONE, HISTOGRAM, CLAHE };
+
+  /**
+   * @brief Outlier rejection of temporal matches.
+   *
+   * FUNDAMENTAL is the RANSAC fundamental matrix of upstream. It is close to
+   * degenerate when nearly every point lies on the ground plane. PLANE rejects
+   * matches far from the motion prior's prediction (needs a valid prior, else
+   * FUNDAMENTAL). RIGIDITY keeps the stereo points whose pairwise 3D distances
+   * stay the same; mono-only tracks then fall back to FUNDAMENTAL.
+   */
+  enum OutlierCheck { FUNDAMENTAL, PLANE, RIGIDITY };
 
   /**
    * @brief Public constructor with configuration variables
@@ -180,6 +192,37 @@ public:
   /// Setter method for number of active features
   void set_num_features(int _num_features) { num_features = _num_features; }
 
+  /**
+   * @brief Motion prior for the next feed_new_camera() call
+   *
+   * The prior predicts where the last tracked features land in the next
+   * image (see MotionPrior). It is used by the KLT start points (use_prior),
+   * the PLANE outlier check and guided descriptor matching. An invalid prior
+   * makes all of them fall back to upstream behaviour.
+   */
+  void set_motion_prior(const MotionPrior &prior) { motion_prior = prior; }
+
+  /**
+   * @brief Options for the motion prior and the outlier check
+   * @param prior_starts If KLT should start from the predicted points
+   * @param check Outlier rejection of temporal matches
+   * @param plane_px PLANE: max distance to the prediction (tracking pixels)
+   * @param rigid_abs_m,rigid_rel RIGIDITY: allowed distance change is
+   * rigid_abs_m + rigid_rel * depth
+   * @param guided_px Guided descriptor matching radius around the
+   * prediction (tracking pixels), <= 0 is off
+   */
+  void set_prior_options(bool prior_starts, OutlierCheck check,
+                         double plane_px, double rigid_abs_m, double rigid_rel,
+                         double guided_px) {
+    use_prior = prior_starts;
+    outlier_check = check;
+    plane_outlier_px = plane_px;
+    rigidity_abs_m = rigid_abs_m;
+    rigidity_rel = rigid_rel;
+    guided_radius_px = guided_px;
+  }
+
 protected:
   /// Camera object which has all calibration in it
   std::unordered_map<size_t, std::shared_ptr<CamBase>> camera_calib;
@@ -223,6 +266,59 @@ protected:
 
   // Timing variables (most children use these...)
   boost::posix_time::ptime rT1, rT2, rT3, rT4, rT5, rT6, rT7;
+
+  /// Motion prior for the next image and how it is used
+  MotionPrior motion_prior;
+  bool use_prior = false;
+  OutlierCheck outlier_check = FUNDAMENTAL;
+  double plane_outlier_px = 20.0;
+  double rigidity_abs_m = 0.03;
+  double rigidity_rel = 0.03;
+  double guided_radius_px = -1.0;
+
+  /// If the prior can be used for this image (valid and for its timestamp)
+  bool prior_for(double timestamp) const {
+    return motion_prior.valid &&
+           std::abs(motion_prior.timestamp_new - timestamp) < 1e-6;
+  }
+
+  /**
+   * @brief Predicts the new pixels of the old points of one camera
+   *
+   * Points whose id the other camera of the stereo pair also saw are
+   * triangulated and projected with the full pose; the rest use the ground
+   * plane / rotation of the prior. Points without a prediction keep their
+   * old pixel and have has_pred false.
+   */
+  std::vector<cv::Point2f>
+  predict_points(size_t cam_id, const std::vector<cv::KeyPoint> &pts,
+                 const std::vector<size_t> &ids, int cam_other,
+                 const std::vector<cv::KeyPoint> &pts_other,
+                 const std::vector<size_t> &ids_other,
+                 std::vector<char> &has_pred, int &num_stereo);
+
+  /**
+   * @brief Prints a [PRED] line: distance of the final tracks to the
+   * prediction, split into the near field (lower two thirds of the image) and
+   * the far field (top third)
+   */
+  void log_prediction_error(double timestamp, size_t cam_id,
+                            const std::vector<cv::Point2f> &pred,
+                            const std::vector<char> &has_pred,
+                            const std::vector<cv::KeyPoint> &final_pts,
+                            const std::vector<uchar> &ok, int rows,
+                            int num_stereo);
+
+  /**
+   * @brief Rigidity check of stereo tracks between two stereo frames
+   * @return Inlier flag per entry (old/new raw pixels of both cameras); all
+   * true if the prior carries no camera models
+   */
+  std::vector<bool> rigidity_check(size_t cam0, size_t cam1,
+                                   const std::vector<cv::Point2f> &uv0_old,
+                                   const std::vector<cv::Point2f> &uv1_old,
+                                   const std::vector<cv::Point2f> &uv0_new,
+                                   const std::vector<cv::Point2f> &uv1_new);
 };
 
 } // namespace ov_core

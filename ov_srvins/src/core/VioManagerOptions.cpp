@@ -415,6 +415,64 @@ void VioManagerOptions::print_and_load_trackers(
     }
     parser->parse_config("knn_ratio", knn_ratio);
     parser->parse_config("track_frequency", track_frequency);
+
+    // Sparse keyframes, all optional
+    std::string keyframe_mode_str = "time";
+    parser->parse_config("keyframe_mode", keyframe_mode_str, false);
+    if (keyframe_mode_str == "time") {
+      keyframe_mode = TIME;
+    } else if (keyframe_mode_str == "overlap_tracked") {
+      keyframe_mode = OVERLAP_TRACKED;
+    } else if (keyframe_mode_str == "overlap_predicted") {
+      keyframe_mode = OVERLAP_PREDICTED;
+    } else if (keyframe_mode_str == "motion") {
+      keyframe_mode = MOTION;
+    } else {
+      PRINT_ERROR(RED "VioManager(): invalid keyframe_mode %s (time, "
+                      "overlap_tracked, overlap_predicted, motion)\n" RESET,
+                  keyframe_mode_str.c_str());
+      std::exit(EXIT_FAILURE);
+    }
+    parser->parse_config("keyframe_overlap_min", keyframe_overlap_min, false);
+    parser->parse_config("keyframe_max_dt", keyframe_max_dt, false);
+    parser->parse_config("keyframe_grid_x", keyframe_grid_x, false);
+    parser->parse_config("keyframe_grid_y", keyframe_grid_y, false);
+    parser->parse_config("trigger_dist", trigger_dist, false);
+    parser->parse_config("trigger_yaw", trigger_yaw, false);
+    parser->parse_config("slam_min_track_len", slam_min_track_len, false);
+    std::string ground_str = "stereo";
+    parser->parse_config("ground_plane_source", ground_str, false);
+    if (ground_str == "stereo") {
+      ground_plane_source = GROUND_STEREO;
+    } else if (ground_str == "fixed") {
+      ground_plane_source = GROUND_FIXED;
+    } else {
+      PRINT_ERROR(RED "VioManager(): invalid ground_plane_source %s (stereo, "
+                      "fixed)\n" RESET,
+                  ground_str.c_str());
+      std::exit(EXIT_FAILURE);
+    }
+    parser->parse_config("ground_cam_height", ground_cam_height, false);
+    parser->parse_config("klt_use_prior", klt_use_prior, false);
+    std::string outlier_str = "fundamental";
+    parser->parse_config("outlier_check", outlier_str, false);
+    if (outlier_str == "fundamental") {
+      outlier_check = ov_core::TrackBase::FUNDAMENTAL;
+    } else if (outlier_str == "plane") {
+      outlier_check = ov_core::TrackBase::PLANE;
+    } else if (outlier_str == "rigidity") {
+      outlier_check = ov_core::TrackBase::RIGIDITY;
+    } else {
+      PRINT_ERROR(RED "VioManager(): invalid outlier_check %s (fundamental, "
+                      "plane, rigidity)\n" RESET,
+                  outlier_str.c_str());
+      std::exit(EXIT_FAILURE);
+    }
+    parser->parse_config("plane_outlier_px", plane_outlier_px, false);
+    parser->parse_config("rigidity_abs_m", rigidity_abs_m, false);
+    parser->parse_config("rigidity_rel", rigidity_rel, false);
+    parser->parse_config("desc_guided_radius_px", desc_guided_radius_px,
+                         false);
   }
   PRINT_DEBUG("FEATURE TRACKING PARAMETERS:\n");
   PRINT_DEBUG("  - use_stereo: %d\n", use_stereo);
@@ -436,6 +494,19 @@ void VioManagerOptions::print_and_load_trackers(
   PRINT_DEBUG("  - hist method: %d\n", (int)histogram_method);
   PRINT_DEBUG("  - knn ratio: %.3f\n", knn_ratio);
   PRINT_DEBUG("  - track frequency: %.1f\n", track_frequency);
+  PRINT_DEBUG("  - keyframe mode: %d (overlap min %.2f, max dt %.1f s, grid "
+              "%dx%d, trigger %.2f m / %.1f deg)\n",
+              (int)keyframe_mode, keyframe_overlap_min, keyframe_max_dt,
+              keyframe_grid_x, keyframe_grid_y, trigger_dist, trigger_yaw);
+  PRINT_DEBUG("  - slam min track len: %d\n", slam_min_track_len);
+  PRINT_DEBUG("  - ground plane: %d (fixed height %.2f m)\n",
+              (int)ground_plane_source, ground_cam_height);
+  PRINT_DEBUG("  - klt use prior: %d\n", klt_use_prior);
+  PRINT_DEBUG("  - outlier check: %d (plane %.1f px, rigidity %.3f m + "
+              "%.3f)\n",
+              (int)outlier_check, plane_outlier_px, rigidity_abs_m,
+              rigidity_rel);
+  PRINT_DEBUG("  - desc guided radius: %.1f px\n", desc_guided_radius_px);
   featinit_options.print(parser);
 }
 
