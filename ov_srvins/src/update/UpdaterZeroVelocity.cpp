@@ -143,6 +143,17 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state,
   // Large final matrices used for update (we will compress these)
   int h_size = (integrated_accel_constraint) ? 12 : 9;
   int m_size = 6 * ((int)imu_recent.size() - 1);
+
+  // A long gap since the last clone (sparse keyframes) can give more IMU rows
+  // than the update buffer holds, and storing the factor would abort
+  if (m_size > state->free_update_rows()) {
+    PRINT_WARNING(YELLOW "[ZUPT]: %d IMU rows exceed the update buffer (%d), "
+                         "skipping\n" RESET,
+                  m_size, state->free_update_rows());
+    last_zupt_state_timestamp_ = 0.0;
+    last_zupt_count_ = 0;
+    return false;
+  }
   MatX H = MatX::Zero(m_size, h_size);
   VecX res = VecX::Zero(m_size);
 

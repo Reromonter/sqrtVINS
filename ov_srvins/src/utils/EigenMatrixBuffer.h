@@ -68,6 +68,8 @@ public:
 
   int cols() const { return cols_; }
 
+  int max_rows() const { return max_rows_; }
+
 private:
   int max_rows_ = 0;
   int max_cols_ = 0;
