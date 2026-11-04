@@ -373,6 +373,65 @@ struct VioManagerOptions {
   /// Frequency we want to track images at (higher freq ones will be dropped)
   DataType track_frequency = 20.0;
 
+  // SPARSE KEYFRAMES ===============================
+
+  /// Which images get a clone and a visual update:
+  /// TIME: every tracked image (upstream; track_frequency sets the rate)
+  /// OVERLAP_TRACKED (A): every image is tracked, only keyframes are cloned,
+  ///   chosen when the share of the last keyframe's grid cells that still
+  ///   hold live tracks falls below keyframe_overlap_min
+  /// OVERLAP_PREDICTED (B): an image is skipped before any processing while
+  ///   the ground grid of the last keyframe, warped into the predicted view,
+  ///   still covers keyframe_overlap_min of the image
+  /// MOTION: an image is skipped before any processing until the predicted
+  ///   motion since the last keyframe reaches trigger_dist or trigger_yaw
+  enum KeyframeMode { TIME, OVERLAP_TRACKED, OVERLAP_PREDICTED, MOTION };
+  KeyframeMode keyframe_mode = TIME;
+
+  /// Overlap below which a new keyframe is taken (modes A and B)
+  double keyframe_overlap_min = 0.7;
+
+  /// A keyframe is forced after this many seconds (modes A, B and motion)
+  double keyframe_max_dt = 5.0;
+
+  /// Grid of image cells the overlap of mode A counts (cam0)
+  int keyframe_grid_x = 8;
+  int keyframe_grid_y = 5;
+
+  /// Motion trigger: distance [m] and heading change [deg] since the keyframe
+  double trigger_dist = 0.2;
+  double trigger_yaw = 15.0;
+
+  /// Min number of measurements for a track to become a SLAM feature; tracks
+  /// that are still alive also qualify. -1 keeps upstream (max_clones + 1,
+  /// and only tracks that reach the oldest clone)
+  int slam_min_track_len = -1;
+
+  /// Ground plane of the motion prior: STEREO fits it at every keyframe from
+  /// stereo points (falls back to FIXED when the fit fails), FIXED puts it
+  /// ground_cam_height below cam0 along gravity
+  enum GroundPlaneSource { GROUND_STEREO, GROUND_FIXED };
+  GroundPlaneSource ground_plane_source = GROUND_STEREO;
+  double ground_cam_height = 0.47;
+
+  /// If KLT starts from the motion prior's prediction instead of the old pixel
+  bool klt_use_prior = false;
+
+  /// Outlier check of temporal matches (see TrackBase::OutlierCheck)
+  ov_core::TrackBase::OutlierCheck outlier_check =
+      ov_core::TrackBase::FUNDAMENTAL;
+
+  /// PLANE check: max distance to the prediction (full-resolution pixels)
+  double plane_outlier_px = 20.0;
+
+  /// RIGIDITY check: allowed change of a 3D distance, abs + rel * depth
+  double rigidity_abs_m = 0.03;
+  double rigidity_rel = 0.03;
+
+  /// Guided descriptor matching radius around the prediction (full-resolution
+  /// pixels), <= 0 is off (upstream brute-force matching)
+  double desc_guided_radius_px = -1.0;
+
   /// Parameters used by our feature initialize / triangulator
   ov_core::FeatureInitializerOptions featinit_options;
 

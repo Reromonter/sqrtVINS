@@ -78,6 +78,33 @@ FlowStats flow_stats(const std::vector<cv::KeyPoint> &pts_old,
   return s;
 }
 
+// KLT start points from the motion prior, kept inside the image
+void set_start_points(std::vector<cv::KeyPoint> &pts,
+                      const std::vector<cv::Point2f> &pred,
+                      const std::vector<char> &has_pred, int cols, int rows) {
+  for (size_t i = 0; i < pts.size() && i < pred.size(); i++) {
+    if (!has_pred.at(i))
+      continue;
+    pts.at(i).pt.x = std::min(std::max(pred.at(i).x, 0.0f), (float)cols - 1);
+    pts.at(i).pt.y = std::min(std::max(pred.at(i).y, 0.0f), (float)rows - 1);
+  }
+}
+
+// Removes the tracks flagged in drop (keeping points and ids aligned)
+void filter_tracks(std::vector<cv::KeyPoint> &pts, std::vector<size_t> &ids,
+                   const std::vector<char> &drop) {
+  std::vector<cv::KeyPoint> pts_keep;
+  std::vector<size_t> ids_keep;
+  for (size_t i = 0; i < pts.size(); i++) {
+    if (drop.at(i))
+      continue;
+    pts_keep.push_back(pts.at(i));
+    ids_keep.push_back(ids.at(i));
+  }
+  pts = pts_keep;
+  ids = ids_keep;
+}
+
 } // namespace
 
 void TrackKLT::feed_new_camera(const CameraData &message) {
@@ -195,11 +222,28 @@ void TrackKLT::feed_monocular(const CameraData &message, size_t msg_id) {
   std::vector<uchar> mask_ll;
   std::vector<cv::KeyPoint> pts_left_new = pts_left_old;
 
+  // Predicted positions from the motion prior (start points / PLANE check)
+  bool have_prior =
+      prior_for(message.timestamp) && (use_prior || outlier_check == PLANE);
+  std::vector<cv::Point2f> pred;
+  std::vector<char> has_pred;
+  int num_stereo = 0;
+  if (have_prior) {
+    pred = predict_points(cam_id, pts_left_old, ids_left_old, -1, {}, {},
+                          has_pred, num_stereo);
+    if (use_prior)
+      set_start_points(pts_left_new, pred, has_pred, img.cols, img.rows);
+  }
+
   // Lets track temporally
   perform_matching(img_pyramid_last[cam_id], imgpyr, pts_left_old, pts_left_new,
-                   cam_id, cam_id, mask_ll);
+                   cam_id, cam_id, mask_ll, have_prior ? &pred : nullptr,
+                   have_prior ? &has_pred : nullptr);
   assert(pts_left_new.size() == ids_left_old.size());
   rT4 = boost::posix_time::microsec_clock::local_time();
+  if (have_prior)
+    log_prediction_error(message.timestamp, cam_id, pred, has_pred,
+                         pts_left_new, mask_ll, img.rows, num_stereo);
 
   FlowStats flow = flow_stats(pts_left_old, pts_left_new, mask_ll, img);
   PRINT_INFO("[FLOW]: t=%.4f w=%d | cam%zu old=%d ok=%d px med=%.2f p90=%.2f "
@@ -339,6 +383,32 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left,
   std::vector<cv::KeyPoint> pts_left_new = pts_left_old;
   std::vector<cv::KeyPoint> pts_right_new = pts_right_old;
 
+  // Predicted positions from the motion prior (start points / PLANE check);
+  // stereo tracks are triangulated and moved with the full pose
+  bool have_prior =
+      prior_for(message.timestamp) && (use_prior || outlier_check == PLANE);
+  std::vector<cv::Point2f> pred_left, pred_right;
+  std::vector<char> has_left, has_right;
+  int stereo_left = 0, stereo_right = 0;
+  if (have_prior) {
+    pred_left = predict_points(cam_id_left, pts_left_old, ids_left_old,
+                               (int)cam_id_right, pts_right_old, ids_right_old,
+                               has_left, stereo_left);
+    pred_right = predict_points(cam_id_right, pts_right_old, ids_right_old,
+                                (int)cam_id_left, pts_left_old, ids_left_old,
+                                has_right, stereo_right);
+    if (use_prior) {
+      set_start_points(pts_left_new, pred_left, has_left, img_left.cols,
+                       img_left.rows);
+      set_start_points(pts_right_new, pred_right, has_right, img_right.cols,
+                       img_right.rows);
+    }
+  }
+
+  // RIGIDITY checks the stereo tracks itself, so it also needs the KLT flags
+  bool rigid = (outlier_check == RIGIDITY);
+  std::vector<uchar> klt_ll, klt_rr;
+
   // Lets track temporally
   parallel_for_(cv::Range(0, 2), LambdaBody([&](const cv::Range &range) {
                   for (int i = range.start; i < range.end; i++) {
@@ -350,10 +420,18 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left,
                         is_left ? pts_left_new : pts_right_new,
                         is_left ? cam_id_left : cam_id_right,
                         is_left ? cam_id_left : cam_id_right,
-                        is_left ? mask_ll : mask_rr);
+                        is_left ? mask_ll : mask_rr,
+                        have_prior ? (is_left ? &pred_left : &pred_right)
+                                   : nullptr,
+                        have_prior ? (is_left ? &has_left : &has_right)
+                                   : nullptr,
+                        rigid ? (is_left ? &klt_ll : &klt_rr) : nullptr);
                   }
                 }));
   rT4 = boost::posix_time::microsec_clock::local_time();
+  if (have_prior)
+    log_prediction_error(message.timestamp, cam_id_left, pred_left, has_left,
+                         pts_left_new, mask_ll, img_left.rows, stereo_left);
 
   FlowStats flow_l = flow_stats(pts_left_old, pts_left_new, mask_ll, img_left);
   FlowStats flow_r =
@@ -401,6 +479,11 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left,
   std::vector<cv::KeyPoint> good_left, good_right;
   std::vector<size_t> good_ids_left, good_ids_right;
 
+  // RIGIDITY: rows of the stereo tracks in good_left / good_right and their
+  // old pixels (left, right)
+  std::vector<std::pair<size_t, size_t>> stereo_rows;
+  std::vector<std::pair<cv::Point2f, cv::Point2f>> stereo_old;
+
   // Loop through all left points
   for (size_t i = 0; i < pts_left_new.size(); i++) {
     // Ensure we do not have any bad KLT tracks (i.e., points are negative)
@@ -420,13 +503,22 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left,
     }
     // If it is a good track, and also tracked from left to right
     // Else track it as a mono feature in just the left image
-    if (mask_ll[i] && found_right && mask_rr[index_right]) {
+    // (RIGIDITY: stereo tracks only need KLT here, they are checked below)
+    bool stereo_ok = rigid ? (!klt_ll.empty() && klt_ll[i] && found_right &&
+                              !klt_rr.empty() && klt_rr[index_right])
+                           : (mask_ll[i] && found_right && mask_rr[index_right]);
+    if (stereo_ok) {
       // Ensure we do not have any bad KLT tracks (i.e., points are negative)
       if (pts_right_new.at(index_right).pt.x < 0 ||
           pts_right_new.at(index_right).pt.y < 0 ||
           (int)pts_right_new.at(index_right).pt.x >= img_right.cols ||
           (int)pts_right_new.at(index_right).pt.y >= img_right.rows)
         continue;
+      if (rigid) {
+        stereo_rows.push_back({good_left.size(), good_right.size()});
+        stereo_old.push_back(
+            {pts_left_old.at(i).pt, pts_right_old.at(index_right).pt});
+      }
       good_left.push_back(pts_left_new.at(i));
       good_right.push_back(pts_right_new.at(index_right));
       good_ids_left.push_back(ids_left_old.at(i));
@@ -458,6 +550,28 @@ void TrackKLT::feed_stereo(const CameraData &message, size_t msg_id_left,
       good_ids_right.push_back(ids_right_old.at(i));
       // PRINT_DEBUG("adding to right - %u \n", ids_right_old.at(i));
     }
+  }
+
+  // RIGIDITY: drop stereo tracks whose 3D distances to the others changed
+  if (rigid && !stereo_rows.empty()) {
+    std::vector<cv::Point2f> n0_old, n1_old, n0_new, n1_new;
+    for (size_t k = 0; k < stereo_rows.size(); k++) {
+      n0_old.push_back(stereo_old.at(k).first);
+      n1_old.push_back(stereo_old.at(k).second);
+      n0_new.push_back(good_left.at(stereo_rows[k].first).pt);
+      n1_new.push_back(good_right.at(stereo_rows[k].second).pt);
+    }
+    std::vector<bool> keep = rigidity_check(cam_id_left, cam_id_right, n0_old,
+                                            n1_old, n0_new, n1_new);
+    std::vector<char> drop_l(good_left.size(), 0), drop_r(good_right.size(), 0);
+    for (size_t k = 0; k < stereo_rows.size(); k++) {
+      if (!keep.at(k)) {
+        drop_l.at(stereo_rows[k].first) = 1;
+        drop_r.at(stereo_rows[k].second) = 1;
+      }
+    }
+    filter_tracks(good_left, good_ids_left, drop_l);
+    filter_tracks(good_right, good_ids_right, drop_r);
   }
 
   // Update our feature database, with theses new observations
@@ -1015,7 +1129,10 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr,
                                 const std::vector<cv::Mat> &img1pyr,
                                 std::vector<cv::KeyPoint> &kpts0,
                                 std::vector<cv::KeyPoint> &kpts1, size_t id0,
-                                size_t id1, std::vector<uchar> &mask_out) {
+                                size_t id1, std::vector<uchar> &mask_out,
+                                const std::vector<cv::Point2f> *pred,
+                                const std::vector<char> *has_pred,
+                                std::vector<uchar> *mask_klt_out) {
 
   // We must have equal vectors
   assert(kpts0.size() == kpts1.size());
@@ -1060,14 +1177,27 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr,
   // Do RANSAC outlier rejection (note since we normalized the max pixel error
   // is now in the normalized cords)
   std::vector<uchar> mask_rsc;
-  DataType max_focallength_img0 = std::max(camera_calib.at(id0)->get_K()(0, 0),
-                                           camera_calib.at(id0)->get_K()(1, 1));
-  DataType max_focallength_img1 = std::max(camera_calib.at(id1)->get_K()(0, 0),
-                                           camera_calib.at(id1)->get_K()(1, 1));
-  DataType max_focallength =
-      std::max(max_focallength_img0, max_focallength_img1);
-  cv::findFundamentalMat(pts0_n, pts1_n, cv::FM_RANSAC,
-                         ransac_thresh / max_focallength, 0.99, mask_rsc);
+  if (outlier_check == PLANE && pred != nullptr && has_pred != nullptr) {
+    // Distance to the prior's prediction instead of the fundamental matrix
+    for (size_t i = 0; i < pts1.size(); i++) {
+      mask_rsc.push_back(
+          (uchar)(has_pred->at(i) &&
+                  cv::norm(pts1.at(i) - pred->at(i)) < plane_outlier_px));
+    }
+  } else {
+    DataType max_focallength_img0 =
+        std::max(camera_calib.at(id0)->get_K()(0, 0),
+                 camera_calib.at(id0)->get_K()(1, 1));
+    DataType max_focallength_img1 =
+        std::max(camera_calib.at(id1)->get_K()(0, 0),
+                 camera_calib.at(id1)->get_K()(1, 1));
+    DataType max_focallength =
+        std::max(max_focallength_img0, max_focallength_img1);
+    cv::findFundamentalMat(pts0_n, pts1_n, cv::FM_RANSAC,
+                           ransac_thresh / max_focallength, 0.99, mask_rsc);
+  }
+  if (mask_klt_out != nullptr)
+    *mask_klt_out = mask_klt;
 
   // Loop through and record only ones that are valid
   for (size_t i = 0; i < mask_klt.size(); i++) {

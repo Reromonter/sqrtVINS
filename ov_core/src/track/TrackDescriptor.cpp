@@ -129,9 +129,19 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
   // Our matches temporally
   std::vector<cv::DMatch> matches_ll;
 
+  // Predicted positions from the motion prior (guided matching / PLANE)
+  bool have_prior = prior_for(message.timestamp) &&
+                    (guided_radius_px > 0 || outlier_check == PLANE);
+  std::vector<cv::Point2f> pred;
+  std::vector<char> has_pred;
+  int num_stereo = 0;
+  if (have_prior)
+    pred = predict_points(cam_id, pts_last[cam_id], ids_last[cam_id], -1, {},
+                          {}, has_pred, num_stereo);
+
   // Lets match temporally
-  robust_match(pts_last[cam_id], pts_new, desc_last[cam_id], desc_new, cam_id,
-               cam_id, matches_ll);
+  temporal_match(pts_last[cam_id], pts_new, desc_last[cam_id], desc_new,
+                 cam_id, have_prior, pred, has_pred, matches_ll);
   rT3 = boost::posix_time::microsec_clock::local_time();
 
   // Get our "good tracks"
@@ -141,6 +151,11 @@ void TrackDescriptor::feed_monocular(const CameraData &message, size_t msg_id) {
 
   // Count how many we have tracked from the last time
   int num_tracklast = 0;
+
+  // Tracked rows (row in good_*, old left / right index) and the fresh id
+  // each would get if RIGIDITY breaks its track
+  std::vector<std::pair<size_t, std::pair<size_t, size_t>>> tracked_rows;
+  std::vector<size_t> new_ids;
 
   // Loop through all current left to right points
   // We want to see if any of theses have matches to the previous frame
@@ -271,18 +286,37 @@ void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left,
                            ids_left_new, ids_right_new);
   rT2 = boost::posix_time::microsec_clock::local_time();
 
+  // Predicted positions from the motion prior (guided matching / PLANE); all
+  // descriptor tracks are stereo, so they move with their triangulated depth
+  bool have_prior = prior_for(message.timestamp) &&
+                    (guided_radius_px > 0 || outlier_check == PLANE);
+  std::vector<cv::Point2f> pred_left, pred_right;
+  std::vector<char> has_left, has_right;
+  int stereo_left = 0, stereo_right = 0;
+  if (have_prior) {
+    pred_left = predict_points(
+        cam_id_left, pts_last[cam_id_left], ids_last[cam_id_left],
+        (int)cam_id_right, pts_last[cam_id_right], ids_last[cam_id_right],
+        has_left, stereo_left);
+    pred_right = predict_points(
+        cam_id_right, pts_last[cam_id_right], ids_last[cam_id_right],
+        (int)cam_id_left, pts_last[cam_id_left], ids_last[cam_id_left],
+        has_right, stereo_right);
+  }
+
   // Our matches temporally
   std::vector<cv::DMatch> matches_ll, matches_rr;
   parallel_for_(cv::Range(0, 2), LambdaBody([&](const cv::Range &range) {
                   for (int i = range.start; i < range.end; i++) {
                     bool is_left = (i == 0);
-                    robust_match(
+                    temporal_match(
                         pts_last[is_left ? cam_id_left : cam_id_right],
                         is_left ? pts_left_new : pts_right_new,
                         desc_last[is_left ? cam_id_left : cam_id_right],
                         is_left ? desc_left_new : desc_right_new,
-                        is_left ? cam_id_left : cam_id_right,
-                        is_left ? cam_id_left : cam_id_right,
+                        is_left ? cam_id_left : cam_id_right, have_prior,
+                        is_left ? pred_left : pred_right,
+                        is_left ? has_left : has_right,
                         is_left ? matches_ll : matches_rr);
                   }
                 }));
@@ -299,6 +333,11 @@ void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left,
 
   // Count how many we have tracked from the last time
   int num_tracklast = 0;
+
+  // Tracked rows (row in good_*, old left / right index) and the fresh id
+  // each would get if RIGIDITY breaks its track
+  std::vector<std::pair<size_t, std::pair<size_t, size_t>>> tracked_rows;
+  std::vector<size_t> new_ids;
 
   // Loop through all current left to right points
   // We want to see if any of theses have matches to the previous frame
@@ -327,6 +366,8 @@ void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left,
     // We also check that we are linked to the same past ID value
     if (idll != -1 && idrr != -1 &&
         ids_last[cam_id_left][idll] == ids_last[cam_id_right][idrr]) {
+      tracked_rows.push_back({good_left.size(), {(size_t)idll, (size_t)idrr}});
+      new_ids.push_back(ids_left_new[i]);
       good_left.push_back(pts_left_new[i]);
       good_right.push_back(pts_right_new[i]);
       good_desc_left.push_back(desc_left_new.row((int)i));
@@ -342,6 +383,26 @@ void TrackDescriptor::feed_stereo(const CameraData &message, size_t msg_id_left,
       good_desc_right.push_back(desc_right_new.row((int)i));
       good_ids_left.push_back(ids_left_new[i]);
       good_ids_right.push_back(ids_left_new[i]);
+    }
+  }
+  // RIGIDITY: a track whose 3D distances to the others changed starts over
+  // as a new feature
+  if (outlier_check == RIGIDITY && !tracked_rows.empty()) {
+    std::vector<cv::Point2f> n0_old, n1_old, n0_new, n1_new;
+    for (const auto &row : tracked_rows) {
+      n0_old.push_back(pts_last[cam_id_left][row.second.first].pt);
+      n1_old.push_back(pts_last[cam_id_right][row.second.second].pt);
+      n0_new.push_back(good_left[row.first].pt);
+      n1_new.push_back(good_right[row.first].pt);
+    }
+    std::vector<bool> keep = rigidity_check(cam_id_left, cam_id_right, n0_old,
+                                            n1_old, n0_new, n1_new);
+    for (size_t k = 0; k < tracked_rows.size(); k++) {
+      if (keep.at(k))
+        continue;
+      good_ids_left[tracked_rows[k].first] = new_ids[k];
+      good_ids_right[tracked_rows[k].first] = new_ids[k];
+      num_tracklast--;
     }
   }
   rT4 = boost::posix_time::microsec_clock::local_time();
@@ -553,7 +614,10 @@ void TrackDescriptor::robust_match(const std::vector<cv::KeyPoint> &pts0,
                                    const std::vector<cv::KeyPoint> &pts1,
                                    const cv::Mat &desc0, const cv::Mat &desc1,
                                    size_t id0, size_t id1,
-                                   std::vector<cv::DMatch> &matches) {
+                                   std::vector<cv::DMatch> &matches,
+                                   const std::vector<cv::Point2f> *pred,
+                                   const std::vector<char> *has_pred,
+                                   bool temporal) {
 
   // Our 1to2 and 2to1 match vectors
   std::vector<std::vector<cv::DMatch>> matches0to1, matches1to0;
@@ -574,6 +638,39 @@ void TrackDescriptor::robust_match(const std::vector<cv::KeyPoint> &pts0,
   // Finally do a symmetry test
   std::vector<cv::DMatch> matches_good;
   robust_symmetry_test(matches0to1, matches1to0, matches_good);
+
+  // And reject the outliers
+  filter_matches(pts0, pts1, id0, id1, matches_good, pred, has_pred, temporal,
+                 matches);
+}
+
+void TrackDescriptor::filter_matches(const std::vector<cv::KeyPoint> &pts0,
+                                     const std::vector<cv::KeyPoint> &pts1,
+                                     size_t id0, size_t id1,
+                                     const std::vector<cv::DMatch> &candidates,
+                                     const std::vector<cv::Point2f> *pred,
+                                     const std::vector<char> *has_pred,
+                                     bool temporal,
+                                     std::vector<cv::DMatch> &matches) {
+
+  // RIGIDITY checks the stereo tracks after the temporal match
+  if (temporal && outlier_check == RIGIDITY) {
+    matches = candidates;
+    return;
+  }
+
+  // PLANE: distance to the prior's prediction
+  if (temporal && outlier_check == PLANE && pred != nullptr &&
+      has_pred != nullptr) {
+    for (const auto &m : candidates) {
+      if (has_pred->at(m.queryIdx) &&
+          cv::norm(pts1.at(m.trainIdx).pt - pred->at(m.queryIdx)) <
+              plane_outlier_px)
+        matches.push_back(m);
+    }
+    return;
+  }
+  std::vector<cv::DMatch> matches_good = candidates;
 
   // Convert points into points for RANSAC
   std::vector<cv::Point2f> pts0_rsc, pts1_rsc;
@@ -662,5 +759,69 @@ void TrackDescriptor::robust_symmetry_test(
         break;
       }
     }
+  }
+}
+
+void TrackDescriptor::guided_match(const std::vector<cv::KeyPoint> &pts0,
+                                   const std::vector<cv::KeyPoint> &pts1,
+                                   const cv::Mat &desc0, const cv::Mat &desc1,
+                                   size_t id0, size_t id1,
+                                   const std::vector<cv::Point2f> &pred,
+                                   const std::vector<char> &has_pred,
+                                   std::vector<cv::DMatch> &matches) {
+  if (desc0.empty() || desc1.empty())
+    return;
+  // best old feature per new keypoint
+  std::vector<cv::DMatch> best_for_new(pts1.size(), cv::DMatch(-1, -1, 1e9f));
+  double r2 = guided_radius_px * guided_radius_px;
+  for (size_t i = 0; i < pts0.size(); i++) {
+    if (!has_pred.at(i))
+      continue;
+    float d1 = 1e9f, d2 = 1e9f;
+    int j1 = -1;
+    for (size_t j = 0; j < pts1.size(); j++) {
+      cv::Point2f dp = pts1.at(j).pt - pred.at(i);
+      if (dp.dot(dp) > r2)
+        continue;
+      float d = (float)cv::norm(desc0.row((int)i), desc1.row((int)j),
+                                cv::NORM_HAMMING);
+      if (d < d1) {
+        d2 = d1;
+        d1 = d;
+        j1 = (int)j;
+      } else if (d < d2) {
+        d2 = d;
+      }
+    }
+    if (j1 < 0)
+      continue;
+    bool pass = (d2 < 1e8f) ? (d1 / std::max(d2, 1.0f) <= knn_ratio)
+                            : (d1 < 64.0f);
+    if (pass && d1 < best_for_new.at(j1).distance)
+      best_for_new.at(j1) = cv::DMatch((int)i, j1, d1);
+  }
+  std::vector<cv::DMatch> candidates;
+  for (const auto &m : best_for_new) {
+    if (m.queryIdx >= 0)
+      candidates.push_back(m);
+  }
+  filter_matches(pts0, pts1, id0, id1, candidates, &pred, &has_pred, true,
+                 matches);
+}
+
+void TrackDescriptor::temporal_match(const std::vector<cv::KeyPoint> &pts0,
+                                     const std::vector<cv::KeyPoint> &pts1,
+                                     const cv::Mat &desc0,
+                                     const cv::Mat &desc1, size_t id,
+                                     bool have_prior,
+                                     const std::vector<cv::Point2f> &pred,
+                                     const std::vector<char> &has_pred,
+                                     std::vector<cv::DMatch> &matches) {
+  if (have_prior && guided_radius_px > 0) {
+    guided_match(pts0, pts1, desc0, desc1, id, id, pred, has_pred, matches);
+  } else {
+    robust_match(pts0, pts1, desc0, desc1, id, id, matches,
+                 have_prior ? &pred : nullptr,
+                 have_prior ? &has_pred : nullptr, true);
   }
 }

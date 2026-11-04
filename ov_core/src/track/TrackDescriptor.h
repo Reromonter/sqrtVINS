@@ -165,7 +165,45 @@ protected:
   void robust_match(const std::vector<cv::KeyPoint> &pts0,
                     const std::vector<cv::KeyPoint> &pts1, const cv::Mat &desc0,
                     const cv::Mat &desc1, size_t id0, size_t id1,
+                    std::vector<cv::DMatch> &matches,
+                    const std::vector<cv::Point2f> *pred = nullptr,
+                    const std::vector<char> *has_pred = nullptr,
+                    bool temporal = false);
+
+  /**
+   * @brief Guided temporal match: each old feature is only compared with the
+   * new keypoints within guided_radius_px of its predicted position
+   *
+   * The ratio test runs over those candidates (a single candidate needs a
+   * Hamming distance below 64 of 256 bits), and every new keypoint keeps only
+   * its best old feature. The outlier check of filter_matches() follows.
+   */
+  void guided_match(const std::vector<cv::KeyPoint> &pts0,
+                    const std::vector<cv::KeyPoint> &pts1, const cv::Mat &desc0,
+                    const cv::Mat &desc1, size_t id0, size_t id1,
+                    const std::vector<cv::Point2f> &pred,
+                    const std::vector<char> &has_pred,
                     std::vector<cv::DMatch> &matches);
+
+  /**
+   * @brief Outlier check of candidate matches: the fundamental RANSAC, or for
+   * temporal matches the PLANE distance to the prediction, or nothing for
+   * RIGIDITY (checked on the stereo tracks afterwards)
+   */
+  void filter_matches(const std::vector<cv::KeyPoint> &pts0,
+                      const std::vector<cv::KeyPoint> &pts1, size_t id0,
+                      size_t id1, const std::vector<cv::DMatch> &candidates,
+                      const std::vector<cv::Point2f> *pred,
+                      const std::vector<char> *has_pred, bool temporal,
+                      std::vector<cv::DMatch> &matches);
+
+  /// Temporal match of one camera: guided when there is a prior and a radius
+  void temporal_match(const std::vector<cv::KeyPoint> &pts0,
+                      const std::vector<cv::KeyPoint> &pts1,
+                      const cv::Mat &desc0, const cv::Mat &desc1, size_t id,
+                      bool have_prior, const std::vector<cv::Point2f> &pred,
+                      const std::vector<char> &has_pred,
+                      std::vector<cv::DMatch> &matches);
 
   // Helper functions for the robust_match function
   // Original code is from the "RobustMatcher" in the opencv examples

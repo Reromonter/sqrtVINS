@@ -37,6 +37,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 
 #include "VioManagerOptions.h"
@@ -145,6 +146,19 @@ public:
   /// Accessor to get the feature tracker
   std::shared_ptr<ov_core::TrackBase> get_track_feat() { return trackFEATS; }
 
+  /// What happened to the last camera message
+  enum FrameStatus {
+    FRAME_NONE = 0,     ///< tracked before initialization (or nothing)
+    FRAME_SKIPPED = 1,  ///< dropped before tracking (keyframe modes B, motion)
+    FRAME_TRACKED = 2,  ///< tracked, but no clone (mode A non-keyframe)
+    FRAME_UPDATED = 3,  ///< cloned and updated (a keyframe)
+    FRAME_ZUPT = 4      ///< zero-velocity update instead
+  };
+  int last_frame_status() { return frame_status; }
+
+  /// Overlap with the last keyframe the last decision saw (-1 if none)
+  double last_frame_overlap() { return frame_overlap; }
+
   /// Get a nice visualization image of what tracks we have
   cv::Mat get_historical_viz_image();
 
@@ -246,6 +260,46 @@ protected:
 
   // Good features that where used in the last update (used in visualization)
   std::vector<Vec3> good_features_MSCKF;
+
+  // Sparse keyframes ===============================
+
+  /// Calibrated (config) IMU to camera extrinsics of every camera
+  void set_fixed_extrinsics(ov_core::MotionPrior &prior);
+
+  /// IMU pose at a camera time: the state itself, or a fast propagation
+  bool predict_imu_pose(double timestamp, Eigen::Matrix3d &R_GtoI,
+                        Eigen::Vector3d &p_IinG);
+
+  /// Hands the tracker the motion prior from the last tracked image to this
+  /// one (also just the extrinsics when only RIGIDITY needs them)
+  void update_motion_prior(double timestamp);
+
+  /// Modes B and motion: true if this image should be dropped untouched
+  bool skip_before_tracking(const ov_core::CameraData &message);
+
+  /// Mode A: true if this tracked image is a keyframe
+  bool keyframe_after_tracking(const ov_core::CameraData &message);
+
+  /// Stores the keyframe bookkeeping (pose, grid cells, samples, plane)
+  void record_keyframe(const ov_core::CameraData &message);
+
+  /// Ground plane at the current state from stereo points, else fixed
+  void fit_ground_plane();
+
+  int frame_status = FRAME_NONE;
+  double frame_overlap = -1;
+  double last_tracked_time = -1;
+  double keyframe_time = -1;
+  Eigen::Matrix3d keyframe_R_GtoI = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d keyframe_p_IinG = Eigen::Vector3d::Zero();
+  std::map<int, std::set<size_t>> keyframe_cells;
+  std::vector<Eigen::Vector3d> keyframe_samples_G;
+  std::vector<bool> keyframe_samples_at_inf;
+  std::map<size_t, VecX> fixed_camera_values;
+  std::map<size_t, std::shared_ptr<ov_core::CamBase>> fixed_cameras;
+  bool ground_valid = false;
+  Eigen::Vector3d ground_n_G = Eigen::Vector3d::UnitZ();
+  double ground_d_G = 0;
 };
 
 } // namespace ov_srvins
