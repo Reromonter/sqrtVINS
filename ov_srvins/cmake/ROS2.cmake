@@ -61,6 +61,7 @@ list(APPEND LIBRARY_SOURCES
         src/state/State.cpp
         src/state/StateHelper.cpp
         src/state/Propagator.cpp
+        src/state/InputImpact.cpp
         src/core/VioManager.cpp
         src/core/VioManagerOptions.cpp
         src/update/UpdaterHelper.cpp
@@ -133,6 +134,8 @@ if (BUILD_TESTING)
     target_link_libraries(test_image_preprocess ov_srvins_lib ${thirdparty_libraries})
     ament_add_gtest(test_sun_sensor_update test/test_sun_sensor_update.cpp)
     target_link_libraries(test_sun_sensor_update ov_srvins_lib ${thirdparty_libraries})
+    ament_add_gtest(test_input_impact test/test_input_impact.cpp)
+    target_link_libraries(test_input_impact ov_srvins_lib ${thirdparty_libraries})
     ament_add_gtest(test_leg_velocity test/test_leg_velocity.cpp)
     target_link_libraries(test_leg_velocity ov_srvins_lib ${thirdparty_libraries})
     target_compile_definitions(test_leg_velocity PRIVATE

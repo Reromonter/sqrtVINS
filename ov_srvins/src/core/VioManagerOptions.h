@@ -258,6 +258,11 @@ struct VioManagerOptions {
   /// the BWL replays both orders were within the repeat-to-repeat spread.
   bool leg_before_visual = true;
 
+  /// Print one [IMPACT] line per processed frame: the information each input
+  /// (IMU propagation, legs, visual, sun, ZUPT) added to the IMU state and the
+  /// correction it applied (see InputImpact)
+  bool log_input_impact = false;
+
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 

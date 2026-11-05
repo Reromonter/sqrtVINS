@@ -246,12 +246,17 @@ public:
   CameraPoseBuffer cam_pose_buffer;
   CameraPoseBuffer cam_pose_fej_buffer;
 
+  /// Measurement rows stacked for the next StateHelper::update_llt
+  int pending_update_rows() const { return R_sqrt_inv_H_UT_.rows(); }
+
 private:
   // Define that the state helper is a friend class of this class
   // This will allow it to access the below functions which should normally not
   // be called This prevents a developer from thinking that the "insert clone"
   // will actually correctly add it to the covariance
   friend class StateHelper;
+  // Reads the IMU columns of U_ (all rows) for its per-frame snapshots
+  friend class InputImpact;
 
   /// Starting ID for clones
   const int kCloneStartId;
