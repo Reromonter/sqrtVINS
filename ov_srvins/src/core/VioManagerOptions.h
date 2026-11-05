@@ -190,8 +190,14 @@ struct VioManagerOptions {
 
   /// Initial guess for the yaw from G to ENU (deg). Zero says "the VINS world
   /// frame already points at true north", which is only true if the filter was
-  /// initialized that way - otherwise let calib_sun_align estimate it.
+  /// initialized that way (sun_init_heading) - otherwise let calib_sun_align
+  /// estimate it.
   DataType sun_align_yaw_deg = 0.0;
+
+  /// Turn the world frame G onto ENU at the first usable sun reading, so the
+  /// estimate starts out at the true heading and the alignment yaw is zero
+  /// (UpdaterSunSensor::set_init_heading). Meant for calib_sun_align off.
+  bool sun_init_heading = false;
 
   /// Pair sun readings with the state on the IMU clock and rotate the reading
   /// to the state time with the gyro (UpdaterSunSensor::set_time_align)

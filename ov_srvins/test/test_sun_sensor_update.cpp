@@ -24,12 +24,13 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-// Closed-loop checks of the sun update's time alignment, robust gate and
-// lock-out recovery, against a synthetic State (no clones, no camera). The
-// math of the measurement model itself is covered by the hand-built harness
-// in lunarleaper-state-estimation/tests/cpp/test_sun_sensor_updater.cpp.
+// Closed-loop checks of the sun update's time alignment, robust gate, lock-out
+// recovery and heading initialization, against a synthetic State (no camera).
+// The math of the measurement model itself is covered by the hand-built
+// harness in lunarleaper-state-estimation/tests/cpp/test_sun_sensor_updater.cpp.
 
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -68,12 +69,12 @@ struct Rig {
   /// psi_align the readings are generated with (G-to-ENU yaw)
   DataType psi_true = 0.3;
 
-  explicit Rig(DataType sigma = 0.0016) {
+  explicit Rig(DataType sigma = 0.0016, bool calib_align = true) {
     ov_core::Printer::setPrintLevel("WARNING");
     StateOptions so;
     so.do_fej = false;
     so.num_cameras = 1;
-    so.do_calib_sun_align = true;
+    so.do_calib_sun_align = calib_align;
     InertialInitializerOptions io;
     io.init_prior_sun_align = 0.5;
     state = std::make_shared<State>(so, io);
@@ -232,4 +233,131 @@ TEST(SunSensorUpdate, InflateGlobalYawAddsExactlyTheYawDirection) {
       e_z.cross(Vec3(0.3, 0.4, -0.1));
   const MatX want = sigma * sigma * n * n.transpose();
   EXPECT_LT((P1 - P0 - want).cwiseAbs().maxCoeff(), 1e-4);
+}
+
+namespace {
+
+/// Angle (deg) between two rotations
+DataType angle_deg(const Mat3 &A, const Mat3 &B) {
+  return ov_core::log_so3(Mat3(A * B.transpose())).norm() / kDeg;
+}
+
+} // namespace
+
+TEST(SunSensorUpdate, RotateGlobalYawIsAChangeOfGauge) {
+  Rig rig;
+  const Mat3 R_clone = ov_core::exp_so3(Vec3(0.3, -0.2, 1.1));
+  const Vec3 p_clone(2.0, -1.0, 0.5);
+  VecX x = rig.state->imu->value();
+  x.head(4) = ov_core::rot_2_quat(R_clone);
+  x.segment(4, 3) = p_clone;
+  rig.state->imu->set_value(x);
+  rig.state->imu->set_fej(x);
+  auto clone = std::dynamic_pointer_cast<ov_type::PoseJPL>(
+      StateHelper::clone(rig.state, rig.state->imu->pose()->clone()));
+  ASSERT_NE(clone, nullptr);
+  rig.state->clones_IMU[0.0] = clone;
+
+  // A fresh clone is an exact copy of the IMU pose (rank-deficient U) until
+  // propagation adds noise. Propagate once with a mixing Phi, so the blocks
+  // are distinct and cross-correlated.
+  std::srand(1);
+  const Eigen::Matrix<DataType, 15, 15> Phi =
+      Eigen::Matrix<DataType, 15, 15>::Identity() +
+      0.2 * Eigen::Matrix<DataType, 15, 15>::Random();
+  const Eigen::Matrix<DataType, 15, 15> Q_sqrt =
+      0.01 * Eigen::Matrix<DataType, 15, 15>::Identity();
+  StateHelper::propagate(rig.state, Phi, Q_sqrt);
+
+  // Move the IMU on, so the clone and the current pose differ
+  const Mat3 R_imu = ov_core::exp_so3(Vec3(-0.1, 0.25, -0.6));
+  const Vec3 p_imu(3.0, 1.0, 0.2), v_imu(0.3, 0.4, -0.1), bg(0.01, 0.0, -0.02);
+  x.head(4) = ov_core::rot_2_quat(R_imu);
+  x.segment(4, 3) = p_imu;
+  x.segment(7, 3) = v_imu;
+  x.segment(10, 3) = bg;
+  rig.state->imu->set_value(x);
+  rig.state->imu->set_fej(x);
+
+  std::vector<std::shared_ptr<ov_type::Type>> order{
+      rig.state->imu->q(), rig.state->imu->p(), rig.state->imu->v(),
+      clone->q(), clone->p()};
+  const MatX P0 = StateHelper::get_marginal_covariance(rig.state, order);
+
+  const DataType dpsi = 0.7;
+  StateHelper::rotate_global_yaw(rig.state, dpsi);
+  const Mat3 C = ov_core::rot_z<DataType>(dpsi);
+
+  EXPECT_LT(angle_deg(rig.state->imu->Rot(), R_imu * C.transpose()), 0.01);
+  EXPECT_LT(angle_deg(rig.state->imu->Rot_fej(), R_imu * C.transpose()), 0.01);
+  EXPECT_LT((rig.state->imu->pos() - C * p_imu).norm(), 1e-5);
+  EXPECT_LT((rig.state->imu->vel() - C * v_imu).norm(), 1e-5);
+  EXPECT_LT((rig.state->imu->bias_g() - bg).norm(), 1e-7);
+  EXPECT_LT(angle_deg(clone->Rot(), R_clone * C.transpose()), 0.01);
+  EXPECT_LT(angle_deg(clone->Rot_fej(), R_clone * C.transpose()), 0.01);
+  EXPECT_LT((clone->pos() - C * p_clone).norm(), 1e-5);
+
+  // P' = T P T^T: orientation errors stay put, positions and velocity turn
+  MatX T = MatX::Identity(15, 15);
+  for (int block : {1, 2, 4})
+    T.block(3 * block, 3 * block, 3, 3) = C;
+  const MatX P1 = StateHelper::get_marginal_covariance(rig.state, order);
+  EXPECT_LT((P1 - T * P0 * T.transpose()).cwiseAbs().maxCoeff(), 1e-6);
+}
+
+TEST(SunSensorUpdate, InitHeadingStartsInEnuWithoutAlignmentCalibration) {
+  // calib_sun_align off and G 57 deg away from ENU. Without init_heading the
+  // filter's tight heading prior rejects a 57 deg residual, so the sun is
+  // locked out from the start. With it, the first reading turns G onto ENU
+  // and every later reading is used.
+  const Mat3 R_GtoI = ov_core::rot_z<DataType>(0.4);
+  for (bool init_heading : {false, true}) {
+    Rig rig(0.0016, false);
+    rig.psi_true = 1.0;
+    rig.sun->set_init_heading(init_heading);
+    rig.set_attitude(R_GtoI);
+    int used = 0;
+    for (int k = 0; k <= 25; k++) {
+      const double t = 0.2 * k;
+      rig.sun->feed_sun(rig.reading(t, R_GtoI), t);
+      used += rig.update(t);
+    }
+    if (init_heading) {
+      EXPECT_EQ(used, 25) << "every reading after the first is used";
+      EXPECT_LT(rig.sun->last_residual().norm() / kDeg, 0.05);
+      // The estimate is now R_ENUtoI = R_GtoI * rot_z(psi_true)
+      EXPECT_LT(angle_deg(rig.state->imu->Rot(),
+                          R_GtoI * ov_core::rot_z<DataType>(rig.psi_true)),
+                0.05);
+      EXPECT_EQ(rig.state->calib_sun_align_yaw->value()(0), 0.0);
+    } else {
+      EXPECT_EQ(used, 0);
+      EXPECT_GT(rig.sun->last_residual().norm() / kDeg, 10.0);
+    }
+  }
+}
+
+TEST(SunSensorUpdate, InitHeadingWithCalibrationZeroesTheAlignmentYaw) {
+  // Same start with the alignment yaw calibrated: init_heading puts the
+  // heading into the IMU and leaves psi_align at zero, instead of the other
+  // way round.
+  const Mat3 R_GtoI = ov_core::rot_z<DataType>(0.4);
+  for (bool init_heading : {false, true}) {
+    Rig rig;
+    rig.psi_true = 1.0;
+    rig.sun->set_init_heading(init_heading);
+    rig.set_attitude(R_GtoI);
+    rig.sun->feed_sun(rig.reading(0.0, R_GtoI), 0.0);
+    rig.update(0.0);
+    const DataType psi = rig.state->calib_sun_align_yaw->value()(0);
+    if (init_heading) {
+      EXPECT_NEAR(psi, 0.0, 1e-6);
+      EXPECT_LT(angle_deg(rig.state->imu->Rot(),
+                          R_GtoI * ov_core::rot_z<DataType>(rig.psi_true)),
+                0.01);
+    } else {
+      EXPECT_NEAR(psi, rig.psi_true, 1e-4);
+      EXPECT_LT(angle_deg(rig.state->imu->Rot(), R_GtoI), 0.01);
+    }
+  }
 }
