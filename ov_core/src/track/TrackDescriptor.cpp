@@ -558,6 +558,11 @@ void TrackDescriptor::robust_match(const std::vector<cv::KeyPoint> &pts0,
   // Our 1to2 and 2to1 match vectors
   std::vector<std::vector<cv::DMatch>> matches0to1, matches1to0;
 
+  // Nothing to match if either side has no descriptors (knnMatch asserts on
+  // an empty matrix, e.g. when a frame keeps no stereo matches)
+  if (desc0.empty() || desc1.empty())
+    return;
+
   // Match descriptors (return 2 nearest neighbours)
   matcher->knnMatch(desc0, desc1, matches0to1, 2);
   matcher->knnMatch(desc1, desc0, matches1to0, 2);

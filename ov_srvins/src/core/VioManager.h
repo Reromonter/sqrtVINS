@@ -142,6 +142,9 @@ public:
   /// Accessor to get the current propagator
   std::shared_ptr<Propagator> get_propagator() { return propagator; }
 
+  /// Accessor to get the feature tracker
+  std::shared_ptr<ov_core::TrackBase> get_track_feat() { return trackFEATS; }
+
   /// Get a nice visualization image of what tracks we have
   cv::Mat get_historical_viz_image();
 
