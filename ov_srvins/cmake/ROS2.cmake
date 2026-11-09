@@ -113,6 +113,11 @@ ament_target_dependencies(run_subscribe_msckf ${ament_libraries})
 target_link_libraries(run_subscribe_msckf ov_srvins_lib ${thirdparty_libraries})
 install(TARGETS run_subscribe_msckf DESTINATION lib/${PROJECT_NAME})
 
+add_executable(run_serial_folder src/run_serial_folder.cpp)
+ament_target_dependencies(run_serial_folder ${ament_libraries})
+target_link_libraries(run_serial_folder ov_srvins_lib ${thirdparty_libraries})
+install(TARGETS run_serial_folder DESTINATION lib/${PROJECT_NAME})
+
 add_executable(run_simulation src/run_simulation.cpp)
 ament_target_dependencies(run_simulation ${ament_libraries})
 target_link_libraries(run_simulation ov_srvins_lib ${thirdparty_libraries})
