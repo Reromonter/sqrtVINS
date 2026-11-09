@@ -400,6 +400,12 @@ void VioManagerOptions::print_and_load_trackers(
     parser->parse_config("grid_y", grid_y);
     parser->parse_config("min_px_dist", min_px_dist);
     parser->parse_config("ransac_th", ransac_th, false);
+    parser->parse_config("ransac_max_iters", ransac_max_iters, false);
+    if (ransac_max_iters < 1) {
+      PRINT_WARNING(YELLOW "ransac_max_iters %d < 1, using 1\n" RESET,
+                    ransac_max_iters);
+      ransac_max_iters = 1;
+    }
     std::string histogram_method_str = "HISTOGRAM";
     parser->parse_config("histogram_method", histogram_method_str);
     if (histogram_method_str == "NONE") {
@@ -435,6 +441,7 @@ void VioManagerOptions::print_and_load_trackers(
   PRINT_DEBUG("  - grid X by Y: %d by %d\n", grid_x, grid_y);
   PRINT_DEBUG("  - min px dist: %d\n", min_px_dist);
   PRINT_DEBUG("  - ransac th: %.2f\n", ransac_th);
+  PRINT_DEBUG("  - ransac max iters: %d\n", ransac_max_iters);
   PRINT_DEBUG("  - hist method: %d\n", (int)histogram_method);
   PRINT_DEBUG("  - knn ratio: %.3f\n", knn_ratio);
   PRINT_DEBUG("  - track frequency: %.1f\n", track_frequency);

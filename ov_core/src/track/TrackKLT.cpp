@@ -1067,7 +1067,8 @@ void TrackKLT::perform_matching(const std::vector<cv::Mat> &img0pyr,
   DataType max_focallength =
       std::max(max_focallength_img0, max_focallength_img1);
   cv::findFundamentalMat(pts0_n, pts1_n, cv::FM_RANSAC,
-                         ransac_thresh / max_focallength, 0.99, mask_rsc);
+                         ransac_thresh / max_focallength, 0.99,
+                         ransac_max_iters, mask_rsc);
 
   // Loop through and record only ones that are valid
   for (size_t i = 0; i < mask_klt.size(); i++) {

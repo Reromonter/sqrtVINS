@@ -367,6 +367,10 @@ struct VioManagerOptions {
   /// RANSAC threshold for our KLT tracker
   double ransac_th = 1.0;
 
+  /// Upper limit on the RANSAC iterations for our KLT tracker (OpenCV default
+  /// 1000)
+  int ransac_max_iters = 1000;
+
   /// What type of pre-processing histogram method should be applied to images
   ov_core::TrackBase::HistogramMethod histogram_method =
       ov_core::TrackBase::HistogramMethod::HISTOGRAM;
