@@ -122,6 +122,7 @@ knn_ratio: 0.70
 track_frequency: 31.0
 downsample_cameras: false
 ransac_th: 2.0 # ransac threshold for the essential matrix
+ransac_max_iters: 1000 # upper limit on the RANSAC iterations of the KLT outlier check (OpenCV default 1000)
 num_opencv_threads: 4 # -1: auto, 0-1: serial, >1: number of threads
 histogram_method: "HISTOGRAM" # NONE, HISTOGRAM, CLAHE
 

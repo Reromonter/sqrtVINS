@@ -145,7 +145,8 @@ VioManager::VioManager(VioManagerOptions &params_)
         state->cam_intrinsics_cameras, init_max_features,
         state->options.max_aruco_features, params.use_stereo,
         params.histogram_method, params.fast_threshold, params.grid_x,
-        params.grid_y, params.min_px_dist, params.ransac_th));
+        params.grid_y, params.min_px_dist, params.ransac_th,
+        params.ransac_max_iters));
   } else {
     trackFEATS = std::shared_ptr<TrackBase>(new TrackDescriptor(
         state->cam_intrinsics_cameras, init_max_features,
@@ -369,8 +370,14 @@ void VioManager::track_image_and_update(
       state->features_SLAM.empty()) {
     // If the same state time, use the previous timestep decision
     if (state->timestamp != message.timestamp) {
+      if (params.log_input_impact)
+        input_impact.begin(state, message.timestamp);
       state->setup_matrix_buffer();
       did_zupt_update = updaterZUPT->try_update(state, message.timestamp);
+      if (params.log_input_impact && did_zupt_update) {
+        input_impact.mark("zupt", state);
+        PRINT_INFO("%s\n", input_impact.line().c_str());
+      }
     }
     if (did_zupt_update) {
       assert(state->timestamp == message.timestamp);
@@ -497,9 +504,13 @@ void VioManager::do_feature_propagate_update(
   // Also augment it with a new clone!
   // NOTE: if the state is already at the given time (can happen in sim)
   // NOTE: then no need to prop since we already are at the desired timestep
+  if (params.log_input_impact)
+    input_impact.begin(state, message.timestamp);
   if (state->timestamp != message.timestamp) {
     propagator->propagate_and_clone(state, message.timestamp);
   }
+  if (params.log_input_impact)
+    input_impact.mark("imu", state, true, false);
   rT3 = boost::posix_time::microsec_clock::local_time();
 
   // If we have not reached max clones, we should just return...
@@ -561,11 +572,15 @@ void VioManager::do_feature_propagate_update(
   // features are then gated against a velocity the legs already corrected.
   // It moves the clones through their correlations, so the camera poses the
   // visual update reads are recomputed.
-  if (updaterLeg != nullptr && params.leg_before_visual &&
-      updaterLeg->try_update(state, state->timestamp)) {
-    state->calculate_clone_poses();
-    if (state->options.do_fej) {
-      state->calculate_clone_poses_fej();
+  if (updaterLeg != nullptr && params.leg_before_visual) {
+    const bool did_leg = updaterLeg->try_update(state, state->timestamp);
+    if (params.log_input_impact)
+      input_impact.mark("leg", state, did_leg);
+    if (did_leg) {
+      state->calculate_clone_poses();
+      if (state->options.do_fej) {
+        state->calculate_clone_poses_fej();
+      }
     }
   }
   rT4 = boost::posix_time::microsec_clock::local_time();
@@ -786,20 +801,29 @@ void VioManager::do_feature_propagate_update(
   rT7 = boost::posix_time::microsec_clock::local_time();
   StateHelper::initialize_slam_in_U(state);
   rT8 = boost::posix_time::microsec_clock::local_time();
+  const bool did_visual = state->pending_update_rows() > 0;
   StateHelper::update_llt(state);
   state->clear(true);
+  if (params.log_input_impact)
+    input_impact.mark("vis", state, did_visual);
 
   // Sun the sun sensor update
   if (updaterSun != nullptr) {
-    updaterSun->try_update(state, state->timestamp,
-                           params.sun_azimuth_deg * M_PI / 180.0,
-                           params.sun_elevation_deg * M_PI / 180.0);
+    const bool did_sun = updaterSun->try_update(
+        state, state->timestamp, params.sun_azimuth_deg * M_PI / 180.0,
+        params.sun_elevation_deg * M_PI / 180.0);
+    if (params.log_input_impact)
+      input_impact.mark("sun", state, did_sun);
   }
 
   // Leg velocity update, on the state the visual update just produced
   if (updaterLeg != nullptr && !params.leg_before_visual) {
-    updaterLeg->try_update(state, state->timestamp);
+    const bool did_leg = updaterLeg->try_update(state, state->timestamp);
+    if (params.log_input_impact)
+      input_impact.mark("leg", state, did_leg);
   }
+  if (params.log_input_impact)
+    PRINT_INFO("%s\n", input_impact.line().c_str());
 
   //===================================================================================
   // Update our visualization feature set, and clean up the old features

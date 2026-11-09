@@ -40,6 +40,7 @@
 #include <string>
 
 #include "VioManagerOptions.h"
+#include "state/InputImpact.h"
 
 namespace ov_core {
 struct ImuData;
@@ -216,6 +217,10 @@ protected:
 
   /// Our leg velocity updater (legged robots)
   std::shared_ptr<UpdaterLegVelocity> updaterLeg;
+
+  /// Per-frame information / correction account of each input
+  /// (log_input_impact)
+  InputImpact input_impact;
 
   /// This is the queue of measurement times that have come in since we starting
   /// doing initialization After we initialize, we will want to prop & update to

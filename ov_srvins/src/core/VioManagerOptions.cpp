@@ -115,6 +115,7 @@ void VioManagerOptions::print_and_load_estimator(
     if (try_leg_velocity && !leg_mechanism_file.empty() &&
         leg_mechanism_file.front() != '/')
       leg_mechanism_file = parser->get_config_folder() + leg_mechanism_file;
+    parser->parse_config("log_input_impact", log_input_impact, false);
     parser->parse_config("record_timing_information",
                          record_timing_information);
     parser->parse_config("record_timing_filepath", record_timing_filepath);
@@ -157,6 +158,7 @@ void VioManagerOptions::print_and_load_estimator(
   PRINT_DEBUG("  - up_leg_max_age_s: %.2f\n", leg_max_age_s);
   PRINT_DEBUG("  - up_leg_recover_after_s: %.2f\n", leg_recover_after_s);
   PRINT_DEBUG("  - up_leg_before_visual: %d\n", leg_before_visual);
+  PRINT_DEBUG("  - log_input_impact: %d\n", log_input_impact);
   PRINT_DEBUG("  - record timing?: %d\n", (int)record_timing_information);
   PRINT_DEBUG("  - record timing filepath: %s\n",
               record_timing_filepath.c_str());
@@ -400,6 +402,12 @@ void VioManagerOptions::print_and_load_trackers(
     parser->parse_config("grid_y", grid_y);
     parser->parse_config("min_px_dist", min_px_dist);
     parser->parse_config("ransac_th", ransac_th, false);
+    parser->parse_config("ransac_max_iters", ransac_max_iters, false);
+    if (ransac_max_iters < 1) {
+      PRINT_WARNING(YELLOW "ransac_max_iters %d < 1, using 1\n" RESET,
+                    ransac_max_iters);
+      ransac_max_iters = 1;
+    }
     std::string histogram_method_str = "HISTOGRAM";
     parser->parse_config("histogram_method", histogram_method_str);
     if (histogram_method_str == "NONE") {
@@ -435,6 +443,7 @@ void VioManagerOptions::print_and_load_trackers(
   PRINT_DEBUG("  - grid X by Y: %d by %d\n", grid_x, grid_y);
   PRINT_DEBUG("  - min px dist: %d\n", min_px_dist);
   PRINT_DEBUG("  - ransac th: %.2f\n", ransac_th);
+  PRINT_DEBUG("  - ransac max iters: %d\n", ransac_max_iters);
   PRINT_DEBUG("  - hist method: %d\n", (int)histogram_method);
   PRINT_DEBUG("  - knn ratio: %.3f\n", knn_ratio);
   PRINT_DEBUG("  - track frequency: %.1f\n", track_frequency);

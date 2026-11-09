@@ -258,6 +258,11 @@ struct VioManagerOptions {
   /// the BWL replays both orders were within the repeat-to-repeat spread.
   bool leg_before_visual = true;
 
+  /// Print one [IMPACT] line per processed frame: the information each input
+  /// (IMU propagation, legs, visual, sun, ZUPT) added to the IMU state and the
+  /// correction it applied (see InputImpact)
+  bool log_input_impact = false;
+
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 
@@ -367,6 +372,10 @@ struct VioManagerOptions {
 
   /// RANSAC threshold for our KLT tracker
   double ransac_th = 1.0;
+
+  /// Upper limit on the RANSAC iterations for our KLT tracker (OpenCV default
+  /// 1000)
+  int ransac_max_iters = 1000;
 
   /// What type of pre-processing histogram method should be applied to images
   ov_core::TrackBase::HistogramMethod histogram_method =

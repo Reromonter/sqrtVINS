@@ -123,6 +123,7 @@ grid_x: 5 # extraction sub-grid count for horizontal direction (uniform tracking
 grid_y: 5 # extraction sub-grid count for vertical direction (uniform tracking)
 min_px_dist: 10  # distance between features (features near each other provide less information)
 ransac_th: 0.5 # ransac threshold for the essential matrix
+ransac_max_iters: 1000 # upper limit on the RANSAC iterations of the KLT outlier check (OpenCV default 1000)
 knn_ratio: 0.70 # descriptor knn threshold for the top two descriptor matches
 track_frequency: 21.0 # frequency we will perform feature tracking at (in frames per second / hertz)
 downsample_cameras: false # will downsample image in half if true

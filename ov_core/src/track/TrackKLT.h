@@ -64,15 +64,20 @@ public:
    * @param gridy size of grid in the y-direction / v-direction
    * @param minpxdist features need to be at least this number pixels away from
    * each other
+   * @param ransacth RANSAC threshold in pixels for the temporal
+   * fundamental-matrix check
+   * @param ransacmaxiters upper limit on the RANSAC iterations of that check
+   * (OpenCV's default is 1000; values below 1 are treated as 1)
    */
   explicit TrackKLT(
       std::unordered_map<size_t, std::shared_ptr<CamBase>> cameras,
       int numfeats, int numaruco, bool stereo, HistogramMethod histmethod,
       int fast_threshold, int gridx, int gridy, int minpxdist,
-      DataType ransacth)
+      DataType ransacth, int ransacmaxiters = 1000)
       : TrackBase(cameras, numfeats, numaruco, stereo, histmethod),
         threshold(fast_threshold), grid_x(gridx), grid_y(gridy),
-        min_px_dist(minpxdist), ransac_thresh(ransacth) {}
+        min_px_dist(minpxdist), ransac_thresh(ransacth),
+        ransac_max_iters(std::max(1, ransacmaxiters)) {}
 
   /**
    * @brief Process a new image
@@ -182,6 +187,11 @@ protected:
   int pyr_levels = 5;
   cv::Size win_size = cv::Size(15, 15);
   DataType ransac_thresh = 0.5;
+
+  // Upper limit on the RANSAC iterations in perform_matching. RANSAC stops
+  // earlier once it is 99 % confident; the limit only binds when fewer than
+  // about 45 % of the tracks are inliers.
+  int ransac_max_iters = 1000;
 
   // Last set of image pyramids
   std::map<size_t, std::vector<cv::Mat>> img_pyramid_last;
