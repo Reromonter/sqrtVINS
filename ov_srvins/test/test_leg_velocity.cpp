@@ -263,6 +263,32 @@ TEST(LegVelocityUpdate, NoJointDataNoUpdate) {
   EXPECT_FALSE(rig.leg->try_update(rig.state, 2.0));
 }
 
+TEST(LegVelocityUpdate, JointQueueStaysBoundedBeforeInitialization) {
+  struct Probe : UpdaterLegVelocity {
+    using UpdaterLegVelocity::UpdaterLegVelocity;
+    size_t queued() {
+      std::lock_guard<std::mutex> lck(raw_mtx_);
+      return raw_.size();
+    }
+  };
+  Rig rig;
+  UpdaterOptions opts(1.0, 1.0);
+  Probe probe(opts, UpdaterLegVelocity::Params(), rig.kin,
+              [](double, double, Vec3 &) { return false; });
+  ov_core::JointStateData m = rig.sample(0.0, Eigen::Vector3d::Zero(), true);
+  // 60 s at 200 Hz with the state still at its uninitialized time of -1
+  for (int k = 0; k < 12000; k++) {
+    m.timestamp = 100.0 + 0.005 * k;
+    probe.feed_joint_state(m, -1.0 - 1.0);
+  }
+  EXPECT_LE(probe.queued(), 410u) << "about 2 s of history";
+  EXPECT_GE(probe.queued(), 390u);
+  // once there is a state time it decides what is kept
+  m.timestamp = 160.0;
+  probe.feed_joint_state(m, 159.5);
+  EXPECT_LE(probe.queued(), 102u);
+}
+
 TEST(LegVelocityUpdate, ConvergesInTheWorldFrameUnderATiltedAttitude) {
   // The legs measure the velocity in the IMU frame; the state carries it in G.
   // With a yawed and tilted IMU the update must still recover v_IinG.
