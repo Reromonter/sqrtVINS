@@ -68,9 +68,11 @@ void UpdaterLegVelocity::feed_joint_state(const JointStateData &message,
                                           double oldest_time) {
   std::lock_guard<std::mutex> lck(raw_mtx_);
   raw_.push_back(message);
-  // Nothing consumes the queue before the filter is initialized
-  while (oldest_time > 0 && !raw_.empty() &&
-         raw_.front().timestamp < oldest_time)
+  // Before the filter is initialized there is no state time to prune against
+  // and nothing consumes the queue, so only the recent history is kept
+  const double retain_from =
+      oldest_time > 0 ? oldest_time : message.timestamp - kHistory;
+  while (!raw_.empty() && raw_.front().timestamp < retain_from)
     raw_.pop_front();
 }
 
