@@ -164,12 +164,11 @@ struct VioManagerOptions {
   DataType sun_sigma_alpha = 0.0016;
   DataType sun_sigma_beta = 0.0016;
 
-  /// Reject readings whose ephemeris puts the sun below this elevation - a low
-  /// sun is where refraction and horizon obstruction bite
+  /// Reject readings while the ephemeris puts the sun below this elevation
   DataType sun_min_elevation_deg = 10.0;
 
-  /// Reject readings whose sun direction is within this angle of gravity. The
-  /// two-vector attitude fix degenerates as the sun approaches the zenith.
+  /// Reject readings while the sun is within this angle of gravity: the yaw
+  /// becomes unobservable as the sun approaches the zenith
   DataType sun_min_gravity_angle_deg = 15.0;
 
   /// Mounting of the sun sensor, as the URDF `<origin rpy=...>` of the sensor
@@ -178,29 +177,24 @@ struct VioManagerOptions {
 
   /// Sun ephemeris for this session, in the gravity-aligned ENU reference
   /// frame: azimuth clockwise from true north, elevation above the horizon.
-  /// At the moment this position is read from the config file.
+  /// Constant for the whole run.
   DataType sun_azimuth_deg = 0.0;
   DataType sun_elevation_deg = 45.0;
 
-  /// Solve the G-to-ENU yaw outright from the first usable sun reading rather
-  /// than letting the filter converge on it. Needed whenever the heading
-  /// starts out unknown. Turn it off when sun_align_yaw_deg below is a real
-  /// surveyed value that a single noisy reading should not overwrite.
+  /// Solve the G-to-ENU yaw from the first usable sun reading instead of
+  /// letting the filter converge on it. Turn it off when sun_align_yaw_deg is
+  /// a surveyed value.
   bool sun_init_align_from_first_reading = true;
 
-  /// Initial guess for the yaw from G to ENU (deg). Zero says "the VINS world
-  /// frame already points at true north", which is only true if the filter was
-  /// initialized that way (sun_init_heading) - otherwise let calib_sun_align
-  /// estimate it.
+  /// Initial guess for the yaw from G to ENU (deg)
   DataType sun_align_yaw_deg = 0.0;
 
   /// Turn the world frame G onto ENU at the first usable sun reading, so the
-  /// estimate starts out at the true heading and the alignment yaw is zero
-  /// (UpdaterSunSensor::set_init_heading). Meant for calib_sun_align off.
+  /// alignment yaw is zero. Meant for calib_sun_align off.
   bool sun_init_heading = false;
 
   /// Pair sun readings with the state on the IMU clock and rotate the reading
-  /// to the state time with the gyro (UpdaterSunSensor::set_time_align)
+  /// to the state time with the gyro
   bool sun_time_align = false;
 
   /// Down-weight readings that fail the chi2 gate instead of dropping them;
@@ -227,8 +221,8 @@ struct VioManagerOptions {
   std::vector<double> leg_R_BtoI = {1, 0, 0, 0, 1, 0, 0, 0, 1};
   std::vector<double> leg_p_BinI = {0, 0, 0};
 
-  /// Noise of one leg's window velocity (m/s, 1-sigma per axis); 0.1 needs
-  /// leg_recover_after_s > 0 (see UpdaterLegVelocity::Params::sigma_v)
+  /// Noise of one leg's window velocity (m/s, 1-sigma per axis); a value this
+  /// tight relies on leg_recover_after_s > 0
   DataType leg_sigma_v = 0.1;
 
   /// Half width of the joint-sample averaging window (s)
@@ -253,14 +247,12 @@ struct VioManagerOptions {
   double leg_recover_after_s = 1.0;
 
   /// Apply the leg update before the visual update of each frame instead of
-  /// after it, so the features are gated against a leg-corrected velocity.
-  /// On by default: it targets the visual lock-out after IMU-only drift; on
-  /// the BWL replays both orders were within the repeat-to-repeat spread.
+  /// after it, so the features are gated against a leg-corrected velocity
   bool leg_before_visual = true;
 
   /// Print one [IMPACT] line per processed frame: the information each input
   /// (IMU propagation, legs, visual, sun, ZUPT) added to the IMU state and the
-  /// correction it applied (see InputImpact)
+  /// correction it applied
   bool log_input_impact = false;
 
   /// If we should record the timing performance to file

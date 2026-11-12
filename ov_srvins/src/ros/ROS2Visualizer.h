@@ -132,7 +132,7 @@ public:
   /// Callback for inertial information
   void callback_inertial(const sensor_msgs::msg::Imu::SharedPtr msg);
 
-  /// Callback for the two-axis sun sensor 
+  /// Callback for the two-axis sun sensor
   void callback_sun(const geometry_msgs::msg::Vector3Stamped::SharedPtr msg);
 
   /// Callback for joint states (leg velocity update)
@@ -242,13 +242,12 @@ protected:
   bool publish_global2imu_tf = true;
   bool publish_calibration_tf = true;
 
-  // If >0, decimate the odomimu publish (and its TF) to this rate, independent
-  // of the IMU input rate — state propagation via feed_measurement_imu() in
-  // callback_inertial() is unaffected. 0 (default) publishes on every sample.
+  // If > 0, limit the odomimu publish (and its TF) to this rate; 0 publishes
+  // on every IMU sample
   double odom_publish_rate_hz = 0.0;
   double last_odom_pub_timestamp = -1.0;
-  // Wall time the last fast propagation for odomimu finished; gates a burst
-  // of queued IMU (after a stall) that the message stamps alone would not
+  // Wall time the last fast propagation for odomimu finished, to throttle a
+  // burst of IMU queued during a stall
   std::chrono::steady_clock::time_point last_odom_prop_wall;
 
   // Files and if we should save total state

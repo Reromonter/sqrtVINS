@@ -63,15 +63,12 @@ struct ImuData {
  * @brief Struct for a single two-axis sun sensor measurement (time, alpha,
  * beta)
  *
- * The angle convention is the one the Needronix NXSS3 model in
- * lunarleaper-state-estimation uses, and the two must stay in lock step:
+ * With s the unit vector towards the sun in the sensor frame:
  *
  *   alpha = atan2(sx, sz)   rotation about the sensor +Y axis
  *   beta  = atan2(sy, sz)   rotation about the sensor +X axis
- *   s     = [tan(alpha), tan(beta), 1] / ||.||
  *
- * where s is the unit vector pointing *towards* the sun, expressed in the
- * sensor frame.
+ * This must match the sun sensor model in lunarleaper-state-estimation.
  */
 struct SunSensorData {
 

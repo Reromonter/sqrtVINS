@@ -119,9 +119,8 @@ public:
    * @param seconds Time in seconds
    * @return Return ROS2 header timestamp
    *
-   * Must take a double, not DataType: with USE_FLOAT the float32 ULP at
-   * Unix-epoch magnitude (~1.8e9 s) is 128 s, which quantizes all stamps
-   * to whole multiples of 128 and breaks downstream TF lookups.
+   * Must take a double, not DataType: a float32 resolves Unix-epoch stamps
+   * only to 128 s.
    */
   static rclcpp::Time get_time_from_seconds(double seconds) {
 

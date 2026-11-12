@@ -273,9 +273,9 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   }
   n_legs_rejected_ += last_rejected_;
   if (accepted.empty()) {
-    // Every stance leg disagrees with the state: either all feet slip at once,
-    // or (far likelier) the state ran away while staying confident. After a
-    // while, give the velocity back enough uncertainty for the legs to pull it.
+    // Every stance leg disagrees with the state, most likely because the
+    // state drifted while staying confident. After a while, give the velocity
+    // back enough uncertainty for the legs to pull it.
     if (inconsistent_since_ < 0)
       inconsistent_since_ = timestamp;
     if (params_.recover_after_s > 0 &&
@@ -313,8 +313,7 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
     }
   }
 
-  // Joint samples arrive on their own schedule, so this update stands on its
-  // own, like the sun update, instead of joining the per-frame batch.
+  // Applied on its own instead of joining the per-frame batch
   state->setup_matrix_buffer();
   state->store_update_factor(HUT_all, RHTr);
   StateHelper::update_llt(state);

@@ -145,11 +145,10 @@ public:
   /**
    * @brief Add uncertainty along the global yaw of the whole trajectory
    *
-   * Stacks one factor row along the direction VIO cannot observe: a rotation
-   * of G about gravity, which turns the IMU pose and velocity and every clone
-   * by the same angle (anchored landmarks and calibration do not move). The
-   * camera updates see no change along it, so they leave the inflation for an
-   * absolute heading reference to resolve instead of pulling it back.
+   * Stacks one factor row along a rotation of G about gravity, which turns
+   * the IMU pose and velocity and every clone by the same angle. VIO cannot
+   * observe this direction, so the inflation stays until an absolute heading
+   * reference resolves it.
    *
    * @param state Pointer to state
    * @param sigma_rad 1-sigma of the added global yaw (rad)
@@ -162,10 +161,8 @@ public:
    *
    * Moves G to G' with p_G' = rot_z(dpsi) * p_G: the IMU pose and velocity,
    * every clone and every global landmark turn with it, values and first
-   * estimates alike, and the covariance is transformed to match. Nothing is
-   * learned or lost - it is a change of gauge, so every camera residual stays
-   * exactly as it was. Biases, calibration and anchored landmarks are relative
-   * quantities and do not change.
+   * estimates alike, and the covariance is transformed to match. A pure change
+   * of gauge: no camera residual changes.
    *
    * @param state Pointer to state
    * @param dpsi Rotation of the world frame about its z axis (rad)
@@ -176,8 +173,6 @@ public:
    * @brief Add isotropic uncertainty to the current IMU velocity
    *
    * Stacks three factor rows on the velocity, i.e. P += sigma^2 I on v_IinG.
-   * Used to re-acquire an absolute velocity reference after the filter
-   * drifted past its gate.
    *
    * @param state Pointer to state
    * @param sigma 1-sigma of the added velocity uncertainty (m/s)

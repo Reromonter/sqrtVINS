@@ -788,7 +788,7 @@ void StateHelper::initialize_state(std::shared_ptr<State> state,
     }
   }
 
-  // Calibrate sun alignment 
+  // Calibrate sun alignment
   if (state->options.do_calib_sun_align) {
     state->calib_sun_align_yaw->set_local_id(current_id);
     state->variables_.push_back(state->calib_sun_align_yaw);

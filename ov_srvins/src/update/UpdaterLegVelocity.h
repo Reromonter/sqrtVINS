@@ -76,10 +76,8 @@ public:
     /// Rotation body -> IMU (v_I = R_BtoI v_B) and the body origin in the IMU
     Mat3 R_BtoI = Mat3::Identity();
     Vec3 p_BinI = Vec3::Zero();
-    /// Noise of one leg's velocity over the window (m/s, 1-sigma per axis).
-    /// 0.1 was the most accurate on BWL (bwl-II/III ATE 0.4-0.7 m vs 0.9-1.6
-    /// at 0.2), but it relies on the lock-out recovery below: without it the
-    /// gate locked the legs out for good at bwl-III's first visual break.
+    /// Noise of one leg's velocity over the window (m/s, 1-sigma per axis). A
+    /// value this tight relies on the lock-out recovery below.
     DataType sigma_v = 0.1;
     /// Half width of the averaging window around the state time (s)
     double half_window_s = 0.1;

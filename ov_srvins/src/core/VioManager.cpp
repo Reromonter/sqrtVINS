@@ -209,8 +209,7 @@ VioManager::VioManager(VioManagerOptions &params_)
                            params.sun_max_residual_deg * M_PI / 180.0);
     updaterSun->set_recovery(params.sun_recover_after_s);
     updaterSun->set_init_heading(params.sun_init_heading);
-    // INFO, not DEBUG: an image without these keys ignores them silently, so
-    // this line is how a run log proves which update it actually ran
+    // INFO so the run log shows which settings were active
     PRINT_INFO("[SUN]: update mode: sigma %.5f / %.5f rad, chi2 x%.1f, "
                "time_align %d, robust %d (max residual %.1f deg), recover "
                "after %.1f s, init_heading %d\n",
@@ -218,8 +217,6 @@ VioManager::VioManager(VioManagerOptions &params_)
                params.sun_options.chi2_multipler, params.sun_time_align,
                params.sun_robust, params.sun_max_residual_deg,
                params.sun_recover_after_s, params.sun_init_heading);
-    // With the alignment yaw free and its prior wide, later readings put most
-    // of the heading drift into psi_align, and G slides off ENU again
     if (params.sun_init_heading && params.state_options.do_calib_sun_align) {
       PRINT_WARNING(YELLOW "[SUN]: sun_init_heading with calib_sun_align on - "
                            "G starts on ENU but will not stay there; turn "
@@ -268,7 +265,6 @@ VioManager::VioManager(VioManagerOptions &params_)
         [this](double t0, double t1, Vec3 &w_mean) {
           return propagator->mean_gyro(t0, t1, w_mean);
         });
-    // INFO: proves in the run log which update actually ran
     PRINT_INFO("[LEG]: velocity update on (%s): sigma %.3f m/s, window "
                "+-%.3f s, stance share %.2f/%.2f, chi2 x%.1f, scale %.3f, "
                "recover after %.1f s, %s the visual update\n",
@@ -292,8 +288,7 @@ void VioManager::feed_measurement_sun(const ov_core::SunSensorData &message) {
   if (updaterSun == nullptr)
     return;
 
-  // Keep only what the next update could still pair with. The state time is
-  // the reference, so anything older than the last state is already unusable.
+  // Readings older than the state can no longer be paired with it
   updaterSun->feed_sun(message, state->timestamp);
 }
 
@@ -568,10 +563,9 @@ void VioManager::do_feature_propagate_update(
   StateHelper::marginalize_old_clone(state);
   StateHelper::marginalize(state);
 
-  // Leg velocity update before the visual one (up_leg_before_visual): the
-  // features are then gated against a velocity the legs already corrected.
-  // It moves the clones through their correlations, so the camera poses the
-  // visual update reads are recomputed.
+  // Leg velocity update before the visual one, so the features are gated
+  // against a leg-corrected velocity. It moves the clones through their
+  // correlations, so the camera poses are recomputed.
   if (updaterLeg != nullptr && params.leg_before_visual) {
     const bool did_leg = updaterLeg->try_update(state, state->timestamp);
     if (params.log_input_impact)
@@ -807,7 +801,7 @@ void VioManager::do_feature_propagate_update(
   if (params.log_input_impact)
     input_impact.mark("vis", state, did_visual);
 
-  // Sun the sun sensor update
+  // Sun sensor update
   if (updaterSun != nullptr) {
     const bool did_sun = updaterSun->try_update(
         state, state->timestamp, params.sun_azimuth_deg * M_PI / 180.0,
@@ -816,7 +810,7 @@ void VioManager::do_feature_propagate_update(
       input_impact.mark("sun", state, did_sun);
   }
 
-  // Leg velocity update, on the state the visual update just produced
+  // Leg velocity update after the visual one
   if (updaterLeg != nullptr && !params.leg_before_visual) {
     const bool did_leg = updaterLeg->try_update(state, state->timestamp);
     if (params.log_input_impact)

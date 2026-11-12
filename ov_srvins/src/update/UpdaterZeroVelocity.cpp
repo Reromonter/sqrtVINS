@@ -201,8 +201,7 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state,
   }
 
   // Noise matrix of the explicit zero-motion update below; the IMU-measurement
-  // update uses zupt_noise_multiplier_ * I implicitly (an m x m dense identity
-  // here cost ~200 MB after a 3 s IMU gap)
+  // update uses zupt_noise_multiplier_ * I implicitly
   MatX R;
 
   // Next propagate the biases forward in time
@@ -224,10 +223,9 @@ bool UpdaterZeroVelocity::try_update(std::shared_ptr<State> state,
   efficient_QR(U_marg);
   U_marg.conservativeResizeLike(MatX::Zero(U_marg.cols(), U_marg.cols()));
   MatX HUT = H * U_marg.transpose().triangularView<Eigen::Lower>();
-  // chi2 = res^T S^-1 res with S = HUT HUT^T + l*I, which is m x m for m = 6
-  // rows per IMU sample. HUT has only 9-12 columns, so use the Woodbury
-  // identity instead of factoring S: after an IMU gap of a few seconds m runs
-  // into the thousands and the dense LLT took seconds per frame.
+  // chi2 = res^T S^-1 res with S = HUT HUT^T + l*I. S has 6 rows per IMU
+  // sample but HUT only 9-12 columns, so use the Woodbury identity instead of
+  // factoring S:
   //   S^-1 = (I - HUT (l*I + HUT^T HUT)^-1 HUT^T) / l
   const double lambda = zupt_noise_multiplier_;
   Eigen::MatrixXd A = HUT.cast<double>();

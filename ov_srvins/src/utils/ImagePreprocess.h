@@ -40,9 +40,7 @@ constexpr int GAUSSIAN_BLUR_KSIZE = 5;
 /**
  * @brief If a kernel size can be used for the gaussian blur
  *
- * cv::GaussianBlur needs an odd size, and 1 would not blur at all. Sigma is
- * left to OpenCV (0.3 * ((ksize - 1) * 0.5 - 1) + 0.8), so the size alone sets
- * how strong the blur is.
+ * Sigma is left to OpenCV, so the size alone sets how strong the blur is.
  *
  * @param ksize Kernel size in pixels, the same along both axes
  * @return True if the size is odd and at least 3
