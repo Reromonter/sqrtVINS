@@ -226,6 +226,25 @@ TEST(LegVelocityUpdate, StanceLegsPullTheVelocityToTheTruth) {
       << "v = " << v.transpose();
 }
 
+TEST(LegVelocityUpdate, OverlappingWindowsCountEachSampleOnce) {
+  // Windows are 0.2 s long. Four updates 0.05 s apart see 0.35 s of joint
+  // data, so they must not leave the velocity more certain than two updates
+  // on disjoint windows, which see 0.4 s.
+  const Eigen::Vector3d v_true(0.3, -0.1, 0.02);
+  auto velocity_variance = [&](const std::vector<double> &times) {
+    Rig rig;
+    for (double t : times)
+      EXPECT_TRUE(rig.step(t, v_true));
+    std::vector<std::shared_ptr<ov_type::Type>> order{rig.state->imu->v()};
+    return StateHelper::get_marginal_covariance(rig.state, order).trace();
+  };
+  const DataType overlapping = velocity_variance({1.0, 1.05, 1.1, 1.15});
+  const DataType disjoint = velocity_variance({1.0, 1.2});
+  const DataType single = velocity_variance({1.0});
+  EXPECT_GT(overlapping, disjoint);
+  EXPECT_LT(overlapping, single) << "the new samples still add information";
+}
+
 TEST(LegVelocityUpdate, GateRejectsASlippingFoot) {
   Rig rig;
   const Eigen::Vector3d v_true(0.3, 0.0, 0.0);

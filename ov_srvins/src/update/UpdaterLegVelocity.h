@@ -67,7 +67,10 @@ namespace ov_srvins {
  * nor the robot mass enter.
  *
  * Joint samples are averaged over a window around the state time, which
- * removes most of the stride-frequency noise of a single sample.
+ * removes most of the stride-frequency noise of a single sample. When the
+ * updates come faster than the window is long, their windows overlap; the
+ * noise is then scaled by sqrt(window / time since the last update), so a
+ * sample shared by several updates still only counts once.
  */
 class UpdaterLegVelocity {
 
@@ -163,6 +166,9 @@ protected:
   bool names_ok_ = false;
 
   int last_accepted_ = 0, last_rejected_ = 0;
+
+  /// Window centre (joint clock) of the last applied update, -1 before it
+  double last_update_tc_ = -1;
 
   /// State time of the first update of the current run in which every stance
   /// leg failed the gate (-1: the last update accepted a leg)

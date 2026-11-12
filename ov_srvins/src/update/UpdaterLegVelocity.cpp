@@ -248,7 +248,12 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   //=========================================================================
   MatX U_dense, U_tri;
   StateHelper::get_marginal_U_block(state, Hx_order, U_dense, U_tri);
-  const DataType sigma = params_.sigma_v;
+  // Frames that come faster than the window is long reuse joint samples: scale
+  // the noise so that each sample counts once over the updates sharing it
+  DataType sigma = params_.sigma_v;
+  if (last_update_tc_ >= 0 && tc > last_update_tc_)
+    sigma *= (DataType)std::sqrt(
+        std::max(1.0, (hi - lo) / (tc - last_update_tc_)));
   const DataType chi2_check = options_.chi2_multipler * chi_squared_table_[3];
 
   std::vector<int> accepted;
@@ -320,6 +325,7 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   StateHelper::update_llt(state);
   state->clear();
 
+  last_update_tc_ = tc;
   last_accepted_ = (int)accepted.size();
   n_legs_accepted_ += last_accepted_;
   n_updates_++;
