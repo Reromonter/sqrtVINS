@@ -293,6 +293,21 @@ void StateHelper::inflate_global_yaw(std::shared_ptr<State> state,
     add_pose(clone.second->Rot(), clone.second->pos(),
              clone.second->q()->id(), clone.second->p()->id());
   }
+  // Landmarks expressed in G turn with it as well, see rotate_global_yaw
+  for (const auto &feat : state->features_SLAM) {
+    const auto &landmark = feat.second;
+    if (LandmarkRepresentation::is_relative_representation(
+            landmark->feat_representation))
+      continue;
+    if (landmark->feat_representation ==
+        LandmarkRepresentation::Representation::GLOBAL_3D) {
+      U_new.block(0, landmark->id(), 1, 3) =
+          sigma_rad * e_z.cross(landmark->get_xyz(false)).transpose();
+    } else {
+      // Global inverse depth (theta, phi, rho): only the azimuth moves
+      U_new(0, landmark->id()) = sigma_rad;
+    }
+  }
   efficient_QR(U_new);
   state->U_ = U_new.topLeftCorner(state->U_.cols(), state->U_.cols())
                   .triangularView<Eigen::Upper>();
