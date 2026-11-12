@@ -305,6 +305,57 @@ TEST(SunSensorUpdate, RotateGlobalYawIsAChangeOfGauge) {
   EXPECT_LT((P1 - T * P0 * T.transpose()).cwiseAbs().maxCoeff(), 1e-6);
 }
 
+TEST(SunSensorUpdate, InitHeadingRefusesAReadingAtTheWrongElevation) {
+  Rig rig(0.0016, false);
+  rig.psi_true = 1.0;
+  rig.sun->set_init_heading(true);
+  const Mat3 R_GtoI = ov_core::rot_z<DataType>(0.4);
+  rig.set_attitude(R_GtoI);
+
+  // A reflection 10 deg above the sun and at another bearing
+  const DataType el = kEl + 10.0 * kDeg, az = kAz + 40.0 * kDeg;
+  const Vec3 fake(std::cos(el) * std::sin(az), std::cos(el) * std::cos(az),
+                  std::sin(el));
+  const Vec2 a =
+      angles(R_GtoI * ov_core::rot_z<DataType>(rig.psi_true) * fake);
+  ov_core::SunSensorData m;
+  m.timestamp = 0.0;
+  m.alpha = a(0);
+  m.beta = a(1);
+  rig.sun->feed_sun(m, 0.0);
+  EXPECT_FALSE(rig.update(0.0));
+  EXPECT_LT(angle_deg(rig.state->imu->Rot(), R_GtoI), 1e-3)
+      << "G must not be turned by it";
+
+  // The next, real reading does initialize the heading
+  rig.sun->feed_sun(rig.reading(0.2, R_GtoI), 0.2);
+  rig.update(0.2);
+  EXPECT_LT(angle_deg(rig.state->imu->Rot(),
+                      R_GtoI * ov_core::rot_z<DataType>(rig.psi_true)),
+            0.05);
+}
+
+TEST(SunSensorUpdate, InitHeadingLeavesTheYawAsUncertainAsTheReading) {
+  const DataType sigma = 0.0016;
+  Rig rig(sigma, false);
+  rig.psi_true = 1.0;
+  rig.sun->set_init_heading(true);
+  const Mat3 R_GtoI = ov_core::rot_z<DataType>(0.4);
+  rig.set_attitude(R_GtoI);
+  // variance of the rotation about G z; R_GtoI e_z is the same in G and ENU
+  auto yaw_variance = [&]() {
+    std::vector<std::shared_ptr<ov_type::Type>> order{rig.state->imu->q()};
+    const Vec3 axis = R_GtoI * Vec3(0.0, 0.0, 1.0);
+    const MatX P = StateHelper::get_marginal_covariance(rig.state, order);
+    return (DataType)(axis.transpose() * P * axis)(0);
+  };
+  const DataType before = yaw_variance();
+  rig.sun->feed_sun(rig.reading(0.0, R_GtoI), 0.0);
+  rig.update(0.0);
+  const DataType want = std::pow(sigma / std::cos(kEl), 2);
+  EXPECT_NEAR(yaw_variance() - before, want, 0.05 * want);
+}
+
 TEST(SunSensorUpdate, InitHeadingStartsInEnuWithoutAlignmentCalibration) {
   // calib_sun_align off and G 57 deg away from ENU. Without init_heading the
   // filter's tight heading prior rejects a 57 deg residual, so the sun is

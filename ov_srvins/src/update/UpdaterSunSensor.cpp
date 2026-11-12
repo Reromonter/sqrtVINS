@@ -268,6 +268,29 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
       state->options.do_calib_sun_align && init_align_from_first_reading_;
   if ((init_heading_ || solve_align) && !align_initialized_) {
     const Vec3 s_meas = angles_to_unit_vector(best.alpha, best.beta);
+
+    // The yaw has no reference yet, but gravity gives the elevation: a
+    // reading that puts the sun at the wrong height is not the sun
+    const DataType elevation_meas = std::asin(
+        std::max((DataType)-1.0,
+                 std::min((DataType)1.0, (state->imu->Rot().transpose() *
+                                          (R_ItoS_.transpose() * s_meas))(2))));
+    if (std::abs(elevation_meas - sun_elevation_rad) > max_residual_rad_) {
+      last_used_timestamp_ = best.timestamp;
+      const std::string reason = "init elevation";
+      if (last_reject_reason_ != reason) {
+        last_reject_reason_ = reason;
+        PRINT_INFO(YELLOW "[SUN]: not initializing the yaw from the reading at "
+                          "%.6f - it puts the sun %.2f deg off the ephemeris "
+                          "elevation (> %.2f deg)\n" RESET,
+                   best.timestamp,
+                   (elevation_meas - sun_elevation_rad) * 180.0 / M_PI,
+                   max_residual_rad_ * 180.0 / M_PI);
+      }
+      count_and_report(timestamp, &n_rejected_);
+      return false;
+    }
+
     // The measured sun direction, carried back into G
     const Vec3 v = state->imu->Rot().transpose() * (R_ItoS_.transpose() * s_meas);
     // rot_z turns s_ENU's horizontal bearing into v's, so the yaw is just the
@@ -284,6 +307,11 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
     state->calib_sun_align_yaw->set_value(psi_vec);
     state->calib_sun_align_yaw->set_fej(psi_vec);
     align_initialized_ = true;
+    // The heading G now has is only as good as this one reading
+    if (init_heading_)
+      StateHelper::inflate_global_yaw(
+          state, std::max(sigma_alpha_, sigma_beta_) /
+                     std::cos(sun_elevation_rad));
     last_used_timestamp_ = best.timestamp;
     // evalctl finds the start of the sun statistics by this line's prefix
     PRINT_INFO(CYAN "[SUN]: initialized the G-to-ENU yaw at %.4f deg from the "
