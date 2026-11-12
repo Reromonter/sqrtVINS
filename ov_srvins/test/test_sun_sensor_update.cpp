@@ -235,6 +235,50 @@ TEST(SunSensorUpdate, InflateGlobalYawAddsExactlyTheYawDirection) {
   EXPECT_LT((P1 - P0 - want).cwiseAbs().maxCoeff(), 1e-4);
 }
 
+TEST(SunSensorUpdate, InflateGlobalYawTurnsGlobalLandmarksToo) {
+  // A landmark expressed in G moves with a rotation of G, so the inflated
+  // direction has to include it: otherwise the cameras observe the inflation.
+  typedef ov_type::LandmarkRepresentation::Representation Rep;
+  for (Rep rep : {Rep::GLOBAL_3D, Rep::GLOBAL_FULL_INVERSE_DEPTH}) {
+    Rig rig;
+    const Mat3 R_GtoI = ov_core::exp_so3(Vec3(0.3, -0.2, 1.1));
+    const Vec3 p_I(2.0, -1.0, 0.5), p_F(4.0, 1.5, 0.8);
+    VecX x = rig.state->imu->value();
+    x.head(4) = ov_core::rot_2_quat(R_GtoI);
+    x.segment(4, 3) = p_I;
+    rig.state->imu->set_value(x);
+    rig.state->imu->set_fej(x);
+
+    auto landmark = std::make_shared<ov_type::Landmark>(3);
+    landmark->featid = 0;
+    landmark->feat_representation = rep;
+    landmark->set_from_xyz(p_F, false);
+    landmark->set_from_xyz(p_F, true);
+    rig.state->setup_matrix_buffer();
+    rig.state->store_init_factor(
+        landmark, 0.05 * MatX::Identity(3, 3),
+        MatX::Zero(rig.state->get_state_size(), 3));
+    StateHelper::initialize_slam_in_U(rig.state);
+    rig.state->clear();
+    rig.state->features_SLAM[landmark->featid] = landmark;
+
+    std::vector<std::shared_ptr<ov_type::Type>> order{
+        rig.state->imu->q(), rig.state->imu->p(), landmark};
+    const MatX P0 = StateHelper::get_marginal_covariance(rig.state, order);
+    const DataType sigma = 0.1;
+    StateHelper::inflate_global_yaw(rig.state, sigma);
+    const MatX P1 = StateHelper::get_marginal_covariance(rig.state, order);
+
+    const Vec3 e_z(0.0, 0.0, 1.0);
+    VecX n(9);
+    n << R_GtoI * e_z, e_z.cross(p_I),
+        (rep == Rep::GLOBAL_3D ? Vec3(e_z.cross(p_F)) : Vec3(1.0, 0.0, 0.0));
+    const MatX want = sigma * sigma * n * n.transpose();
+    EXPECT_LT((P1 - P0 - want).cwiseAbs().maxCoeff(), 1e-4)
+        << "representation " << (int)rep;
+  }
+}
+
 namespace {
 
 /// Angle (deg) between two rotations
