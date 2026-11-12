@@ -84,6 +84,22 @@ struct SunSensorData {
   /// Sensor-frame angle about the sensor +X axis (rad)
   DataType beta;
 
+  /**
+   * @brief Set the two angles from a sun direction in the sensor frame
+   *
+   * The angles only describe a sun in front of the sensor, so a direction
+   * with z <= 0 (which includes a zero vector) is refused.
+   *
+   * @return False if the direction is non-finite or not in front of the sensor
+   */
+  bool set_direction(double sx, double sy, double sz) {
+    if (!std::isfinite(sx) || !std::isfinite(sy) || !(sz > 0.0))
+      return false;
+    alpha = (DataType)std::atan2(sx, sz);
+    beta = (DataType)std::atan2(sy, sz);
+    return true;
+  }
+
   /// Sort function to allow for using of STL containers
   bool operator<(const SunSensorData &other) const {
     return timestamp < other.timestamp;
