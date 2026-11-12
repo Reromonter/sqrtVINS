@@ -374,9 +374,13 @@ bool DynamicInitializer::initialize(std::shared_ptr<State> &state) {
     }
   }
   if (!solved) {
+    // The configured G-to-ENU yaw is only stored in the state, carry it over
+    const VecX sun_align_yaw = state->calib_sun_align_yaw->value();
     state = std::make_shared<State>(state->options,
                                     state->init_options); // Reset the state
     StateHelper::initialize_state(state, VecX::Zero(15), -1);
+    state->calib_sun_align_yaw->set_value(sun_align_yaw);
+    state->calib_sun_align_yaw->set_fej(sun_align_yaw);
     return false;
   }
 
