@@ -86,6 +86,12 @@ void VioManagerOptions::print_and_load_estimator(
                          sun_min_gravity_angle_deg, false);
     parser->parse_config("up_sun_extrinsic_rpy_deg", sun_extrinsic_rpy_deg,
                          false);
+    if (sun_extrinsic_rpy_deg.size() != 3) {
+      PRINT_ERROR(RED "VioManager(): up_sun_extrinsic_rpy_deg needs 3 values "
+                      "(roll, pitch, yaw), got %zu\n" RESET,
+                  sun_extrinsic_rpy_deg.size());
+      std::exit(EXIT_FAILURE);
+    }
     parser->parse_config("sun_azimuth_deg", sun_azimuth_deg, false);
     parser->parse_config("sun_elevation_deg", sun_elevation_deg, false);
     parser->parse_config("sun_align_yaw_deg", sun_align_yaw_deg, false);
