@@ -254,7 +254,6 @@ VioManager::VioManager(VioManagerOptions &params_)
     lp.share_off = params.leg_share_off;
     lp.min_stance_fraction = params.leg_min_stance_fraction;
     lp.velocity_scale = params.leg_velocity_scale;
-    lp.max_age_s = params.leg_max_age_s;
     lp.recover_after_s = params.leg_recover_after_s;
     std::shared_ptr<LegKinematics> kin;
     try {

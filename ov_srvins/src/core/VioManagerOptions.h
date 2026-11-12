@@ -245,9 +245,6 @@ struct VioManagerOptions {
   /// Kinematic scale on the leg velocity
   DataType leg_velocity_scale = 1.0;
 
-  /// Skip the update if the newest joint sample is older than this (s)
-  double leg_max_age_s = 0.5;
-
   /// Inflate the velocity after this long with every stance leg failing the
   /// gate (s, 0 = never)
   double leg_recover_after_s = 1.0;

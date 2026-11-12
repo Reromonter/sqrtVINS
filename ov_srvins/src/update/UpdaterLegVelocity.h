@@ -92,8 +92,6 @@ public:
     double min_stance_fraction = 0.8;
     /// Kinematic scale on the leg velocity (Cerberus-style leg calibration)
     DataType velocity_scale = 1.0;
-    /// Skip the update when the newest joint sample is older than this (s)
-    double max_age_s = 0.5;
     /// After this long with every stance leg failing the gate, inflate the
     /// velocity uncertainty so the legs can pull the state back (s, 0 = never)
     double recover_after_s = 1.0;
