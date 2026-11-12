@@ -129,6 +129,23 @@ Mat3 spun(DataType w, double t) {
 
 } // namespace
 
+TEST(SunSensorData, OnlyADirectionInFrontOfTheSensorIsAReading) {
+  ov_core::SunSensorData m;
+  const Vec3 s = Vec3(0.3, -0.2, 0.9).normalized();
+  ASSERT_TRUE(m.set_direction(s(0), s(1), s(2)));
+  EXPECT_NEAR(m.alpha, angles(s)(0), 1e-6);
+  EXPECT_NEAR(m.beta, angles(s)(1), 1e-6);
+
+  m.alpha = m.beta = 7.0;
+  EXPECT_FALSE(m.set_direction(0.0, 0.0, 0.0)) << "no sun in view";
+  EXPECT_FALSE(m.set_direction(0.3, -0.2, -0.9)) << "behind the sensor";
+  EXPECT_FALSE(m.set_direction(1.0, 0.0, 0.0)) << "in the sensor plane";
+  EXPECT_FALSE(m.set_direction(std::nan(""), 0.0, 1.0));
+  EXPECT_FALSE(m.set_direction(0.0, 0.0, std::nan("")));
+  EXPECT_EQ(m.alpha, (DataType)7.0) << "a refused direction changes nothing";
+  EXPECT_EQ(m.beta, (DataType)7.0);
+}
+
 TEST(SunSensorUpdate, GyroAlignmentRemovesTheReadingStateSkew) {
   const DataType w = 30.0 * kDeg; // a brisk turn
   for (bool align : {false, true}) {

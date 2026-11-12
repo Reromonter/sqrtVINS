@@ -534,12 +534,10 @@ void ROS2Visualizer::callback_sun(
   // Pubish sun sensor measurements
   ov_core::SunSensorData message;
   message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
-  message.alpha = std::atan2(msg->vector.x, msg->vector.z);
-  message.beta = std::atan2(msg->vector.y, msg->vector.z);
-
-  if (!std::isfinite(message.alpha) || !std::isfinite(message.beta)) {
-    PRINT_DEBUG(YELLOW "sun sensor published a non-finite direction "
-                       "(%.3f, %.3f, %.3f) - ignoring\n" RESET,
+  if (!message.set_direction(msg->vector.x, msg->vector.y, msg->vector.z)) {
+    PRINT_DEBUG(YELLOW "sun sensor published a direction that is non-finite "
+                       "or not in front of it (%.3f, %.3f, %.3f) - ignoring\n"
+                       RESET,
                 msg->vector.x, msg->vector.y, msg->vector.z);
     return;
   }
