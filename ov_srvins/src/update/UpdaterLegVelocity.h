@@ -158,9 +158,10 @@ protected:
   std::deque<Sample> samples_;
   std::array<bool, LegKinematics::kLegs> stance_state_{};
 
-  /// message joint index of each motor, resolved from the first message
+  /// message joint index of each motor, re-resolved when the names change
   std::vector<int> joint_index_;
   bool names_ok_ = false;
+  bool warned_missing_joint_ = false;
 
   int last_accepted_ = 0, last_rejected_ = 0;
 

@@ -89,14 +89,20 @@ void UpdaterLegVelocity::process_new_samples(const Vec3 &up_B) {
   for (const auto &msg : fresh) {
     if (!samples_.empty() && msg.timestamp <= samples_.back().timestamp)
       continue;
+    // The resolved indices only hold for the joint order they came from
+    for (size_t m = 0; m < motors.size() && names_ok_; m++)
+      names_ok_ = (size_t)joint_index_[m] < msg.names.size() &&
+                  msg.names[joint_index_[m]] == motors[m];
     if (!names_ok_) {
       joint_index_.assign(motors.size(), -1);
       for (size_t m = 0; m < motors.size(); m++) {
         auto it = std::find(msg.names.begin(), msg.names.end(), motors[m]);
         if (it == msg.names.end()) {
-          PRINT_WARNING(YELLOW "[LEG]: joint state has no %s - leg update "
-                               "disabled until it does\n" RESET,
-                        motors[m].c_str());
+          if (!warned_missing_joint_)
+            PRINT_WARNING(YELLOW "[LEG]: joint state has no %s - leg update "
+                                 "disabled until it does\n" RESET,
+                          motors[m].c_str());
+          warned_missing_joint_ = true;
           joint_index_.clear();
           break;
         }
@@ -105,6 +111,7 @@ void UpdaterLegVelocity::process_new_samples(const Vec3 &up_B) {
       names_ok_ = !joint_index_.empty();
       if (!names_ok_)
         continue;
+      warned_missing_joint_ = false;
     }
     const size_t n = msg.names.size();
     if (msg.position.size() != n || msg.velocity.size() != n ||

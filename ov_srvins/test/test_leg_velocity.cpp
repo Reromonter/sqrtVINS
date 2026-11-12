@@ -30,6 +30,7 @@
 // in leg_kinematics_reference_bwl.yaml, both written by
 // lunarleaper-state-estimation/legged_odometry/tools/export_mechanism.py.
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -236,6 +237,40 @@ TEST(LegVelocityUpdate, GateRejectsASlippingFoot) {
   EXPECT_EQ(rig.leg->last_accepted(), 1);
   EXPECT_EQ(rig.leg->last_rejected(), 1);
   EXPECT_LT((rig.state->imu->vel() - v_true.cast<DataType>()).norm(), 0.02);
+}
+
+TEST(LegVelocityUpdate, FollowsAChangedJointOrder) {
+  Rig rig;
+  const Eigen::Vector3d v_true(0.3, -0.1, 0.02);
+  ASSERT_TRUE(rig.step(1.0, v_true));
+  // the same robot, now publishing its joints in reverse order
+  for (int k = 2; k <= 20; k++) {
+    const double t = 0.5 * k;
+    for (int i = -30; i <= 30; i++) {
+      ov_core::JointStateData m = rig.sample(t + 0.005 * i, v_true, true);
+      std::reverse(m.names.begin(), m.names.end());
+      std::reverse(m.position.begin(), m.position.end());
+      std::reverse(m.velocity.begin(), m.velocity.end());
+      std::reverse(m.effort.begin(), m.effort.end());
+      rig.leg->feed_joint_state(m, -1);
+    }
+    rig.state->timestamp = t;
+    ASSERT_TRUE(rig.leg->try_update(rig.state, t));
+    EXPECT_EQ(rig.leg->last_accepted(), 2);
+  }
+  EXPECT_LT((rig.state->imu->vel() - v_true.cast<DataType>()).norm(), 0.01);
+
+  // a message that lost half its joints is skipped instead of read past
+  for (int i = -30; i <= 30; i++) {
+    ov_core::JointStateData m = rig.sample(11.0 + 0.005 * i, v_true, true);
+    m.names.resize(6);
+    m.position.resize(6);
+    m.velocity.resize(6);
+    m.effort.resize(6);
+    rig.leg->feed_joint_state(m, -1);
+  }
+  rig.state->timestamp = 11.0;
+  EXPECT_FALSE(rig.leg->try_update(rig.state, 11.0));
 }
 
 TEST(LegVelocityUpdate, GyroBiasEntersThroughTheLeverArm) {
