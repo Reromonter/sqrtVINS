@@ -169,8 +169,11 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
                                   DataType sun_elevation_rad) {
 
   // Nothing to do without a reading
-  if (sun_data_.empty())
-    return false;
+  {
+    std::lock_guard<std::mutex> lck(sun_data_mtx_);
+    if (sun_data_.empty())
+      return false;
+  }
 
   //=========================================================================
   // Geometry gating
