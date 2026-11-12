@@ -171,8 +171,7 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
   const double t_imu = timestamp + state->calib_dt_CAMtoIMU->value()(0);
   const double tc = t_imu + params_.time_offset_s;
   const double w = params_.half_window_s;
-  if (samples_.empty() || samples_.back().timestamp < tc - params_.max_age_s ||
-      samples_.back().timestamp < tc - w) {
+  if (samples_.empty() || samples_.back().timestamp < tc - w) {
     n_no_data_++;
     report(timestamp);
     return false;

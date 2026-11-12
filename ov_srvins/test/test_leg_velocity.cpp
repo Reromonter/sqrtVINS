@@ -256,7 +256,7 @@ TEST(LegVelocityUpdate, NoJointDataNoUpdate) {
   Rig rig;
   rig.state->timestamp = 1.0;
   EXPECT_FALSE(rig.leg->try_update(rig.state, 1.0));
-  // stale data: the newest sample is older than max_age_s
+  // stale data: the newest sample is older than the window
   for (int k = 0; k < 20; k++)
     rig.leg->feed_joint_state(rig.sample(0.2 + 0.005 * k, Eigen::Vector3d::Zero(), true), -1);
   rig.state->timestamp = 2.0;

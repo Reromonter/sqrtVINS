@@ -109,7 +109,6 @@ void VioManagerOptions::print_and_load_estimator(
     parser->parse_config("up_leg_min_stance_fraction", leg_min_stance_fraction,
                          false);
     parser->parse_config("up_leg_velocity_scale", leg_velocity_scale, false);
-    parser->parse_config("up_leg_max_age_s", leg_max_age_s, false);
     parser->parse_config("up_leg_recover_after_s", leg_recover_after_s, false);
     parser->parse_config("up_leg_before_visual", leg_before_visual, false);
     if (try_leg_velocity && !leg_mechanism_file.empty() &&
@@ -155,7 +154,6 @@ void VioManagerOptions::print_and_load_estimator(
   PRINT_DEBUG("  - up_leg_min_stance_fraction: %.2f\n",
               leg_min_stance_fraction);
   PRINT_DEBUG("  - up_leg_velocity_scale: %.3f\n", leg_velocity_scale);
-  PRINT_DEBUG("  - up_leg_max_age_s: %.2f\n", leg_max_age_s);
   PRINT_DEBUG("  - up_leg_recover_after_s: %.2f\n", leg_recover_after_s);
   PRINT_DEBUG("  - up_leg_before_visual: %d\n", leg_before_visual);
   PRINT_DEBUG("  - log_input_impact: %d\n", log_input_impact);
