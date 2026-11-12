@@ -31,7 +31,11 @@
 // lunarleaper-state-estimation/legged_odometry/tools/export_mechanism.py.
 
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <memory>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -118,6 +122,32 @@ TEST(LegKinematics, JacobianMatchesFiniteDifferences) {
       if (other != leg)
         EXPECT_LT((rp.foot[other] - rm.foot[other]).norm(), 1e-12);
   }
+}
+
+TEST(LegKinematics, RejectsOutOfRangeIndices) {
+  std::ifstream in(kMechanism);
+  ASSERT_TRUE(in.good());
+  std::stringstream buffer;
+  buffer << in.rdbuf();
+  const std::string good = buffer.str();
+  // one corrupted index per array the solver indexes with
+  const std::vector<std::pair<std::string, std::string>> edits = {
+      {"closure_body_a: [ 37,", "closure_body_a: [ 45,"},
+      {"closure_body_b: [ 25,", "closure_body_b: [ -1,"},
+      {"motor_joints: [ 0,", "motor_joints: [ 44,"},
+      {"leg_closures: [ 0,", "leg_closures: [ 8,"},
+      {"leg_passives: [ 12,", "leg_passives: [ 99,"},
+      {"leg_tl_body: [ 25,", "leg_tl_body: [ 45,"}};
+  const std::string path = ::testing::TempDir() + "leg_mechanism_bad.yaml";
+  for (const auto &edit : edits) {
+    std::string bad = good;
+    const size_t at = bad.find(edit.first);
+    ASSERT_NE(at, std::string::npos) << edit.first;
+    bad.replace(at, edit.first.size(), edit.second);
+    std::ofstream(path) << bad;
+    EXPECT_THROW(LegKinematics kin(path), std::runtime_error) << edit.second;
+  }
+  std::remove(path.c_str());
 }
 
 TEST(LegKinematics, UnreachableLegHoldsThenRecovers) {

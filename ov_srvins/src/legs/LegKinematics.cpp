@@ -128,6 +128,16 @@ LegKinematics::LegKinematics(const std::string &mechanism_path) {
     throw std::runtime_error("leg mechanism: expected 4 legs x (3 motors, 2 "
                              "closures, 6 passives) in " +
                              mechanism_path);
+  const auto all_below = [](const std::vector<int> &ids, size_t n) {
+    return std::all_of(ids.begin(), ids.end(),
+                       [n](int i) { return i >= 0 && (size_t)i < n; });
+  };
+  if (!all_below(cA_, num_bodies_) || !all_below(cB_, num_bodies_) ||
+      !all_below(tl, num_bodies_) || !all_below(motors, nj) ||
+      !all_below(passives, nj) || !all_below(closures, cA_.size()))
+    throw std::runtime_error("leg mechanism: body, joint or closure index "
+                             "out of range in " +
+                             mechanism_path);
   for (int leg = 0; leg < kLegs; leg++) {
     for (int m = 0; m < 3; m++)
       motor_joint_[leg][m] = motors[3 * leg + m];
