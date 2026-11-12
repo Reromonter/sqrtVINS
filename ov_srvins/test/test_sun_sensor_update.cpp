@@ -210,6 +210,33 @@ TEST(SunSensorUpdate, RecoveryEscapesTheLockOut) {
   }
 }
 
+TEST(SunSensorUpdate, APauseBreaksTheLockOutRun) {
+  // One failing reading before a pause and one after it are not "every
+  // reading failing for recover_after_s": no inflation yet.
+  Rig rig;
+  rig.converge();
+  rig.sun->set_recovery(1.0);
+  auto yaw_variance = [&rig]() {
+    std::vector<std::shared_ptr<ov_type::Type>> order{rig.state->imu->q()};
+    return StateHelper::get_marginal_covariance(rig.state, order).trace();
+  };
+  const DataType before = yaw_variance();
+  rig.sun->feed_sun(rig.reading(6.0, Mat3::Identity(), 3.0 * kDeg), 5.9);
+  EXPECT_FALSE(rig.update(6.0));
+  rig.sun->feed_sun(rig.reading(10.0, Mat3::Identity(), 3.0 * kDeg), 9.9);
+  EXPECT_FALSE(rig.update(10.0));
+  EXPECT_NEAR(yaw_variance(), before, 1e-6 * before);
+  // failures in a row for recover_after_s still trigger the recovery
+  int used = 0;
+  for (int k = 1; k <= 20; k++) {
+    const double t = 10.0 + 0.2 * k;
+    rig.sun->feed_sun(rig.reading(t, Mat3::Identity(), 3.0 * kDeg), t - 0.1);
+    used += rig.update(t);
+  }
+  EXPECT_GT(used, 5);
+  EXPECT_LT(rig.sun->last_residual().norm() / kDeg, 0.05);
+}
+
 TEST(SunSensorUpdate, InflateGlobalYawAddsExactlyTheYawDirection) {
   Rig rig;
   const Mat3 R_GtoI = ov_core::exp_so3(Vec3(0.3, -0.2, 1.1));

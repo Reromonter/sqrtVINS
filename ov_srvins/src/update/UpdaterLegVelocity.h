@@ -167,6 +167,8 @@ protected:
   /// State time of the first update of the current run in which every stance
   /// leg failed the gate (-1: the last update accepted a leg)
   double inconsistent_since_ = -1;
+  /// State time of the last update in which every stance leg failed the gate
+  double last_inconsistent_ = -1e9;
   std::vector<Vec3> last_residuals_;
 
   /// Periodic statistics, printed every kStatsPeriod of state time

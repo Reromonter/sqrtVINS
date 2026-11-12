@@ -302,3 +302,30 @@ TEST(LegVelocityUpdate, RecoveryEscapesTheLockOut) {
       EXPECT_GT(err, 0.9) << "without recovery the legs stay locked out";
   }
 }
+
+TEST(LegVelocityUpdate, APauseBreaksTheLockOutRun) {
+  // One failure before a pause (a flight phase) and one after it are not
+  // "every stance leg failing for recover_after_s": no inflation yet.
+  Rig rig(0.05, 1.0);
+  const Eigen::Vector3d v_true(0.3, 0.0, 0.0);
+  for (int k = 1; k <= 20; k++)
+    rig.step(0.5 * k, v_true);
+  VecX x = rig.state->imu->value();
+  x.segment<3>(7) += Vec3(1.0, 0.0, 0.0);
+  rig.state->imu->set_value(x);
+  auto velocity_variance = [&rig]() {
+    std::vector<std::shared_ptr<ov_type::Type>> order{rig.state->imu->v()};
+    return StateHelper::get_marginal_covariance(rig.state, order).trace();
+  };
+  const DataType before = velocity_variance();
+  EXPECT_FALSE(rig.step(10.5, v_true));
+  EXPECT_FALSE(rig.step(13.5, v_true));
+  EXPECT_NEAR(velocity_variance(), before, 1e-6 * before);
+  // failures in a row for recover_after_s still trigger the recovery
+  rig.step(14.0, v_true);
+  rig.step(14.5, v_true);
+  EXPECT_GT(velocity_variance(), before + 0.01);
+  for (int k = 30; k <= 40; k++)
+    rig.step(0.5 * k, v_true);
+  EXPECT_LT((rig.state->imu->vel() - v_true.cast<DataType>()).norm(), 0.02);
+}

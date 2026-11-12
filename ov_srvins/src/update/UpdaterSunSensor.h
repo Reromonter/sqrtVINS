@@ -212,6 +212,8 @@ protected:
   /// State time of the first reading of the current run of readings that
   /// failed the gate (-1: the last reading passed)
   double inconsistent_since_ = -1;
+  /// State time of the last reading that failed the gate
+  double last_inconsistent_ = -1e9;
 
   /// Periodic statistics, printed every kStatsPeriod of state time
   void count_and_report(double timestamp, int *counter);
