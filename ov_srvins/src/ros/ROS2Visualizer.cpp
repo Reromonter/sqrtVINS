@@ -193,10 +193,8 @@ void ROS2Visualizer::setup_subscribers(
   _node->declare_parameter<std::string>("topic_imu", "/imu0");
   _node->get_parameter("topic_imu", topic_imu);
   parser->parse_external("relative_config_imu", "imu0", "rostopic", topic_imu);
-  // Keep 5 s of 400 Hz IMU (SensorDataQoS keeps 5 samples): when the callbacks
-  // are blocked for a moment (e.g. the camera callback waiting on a long
-  // update), the IMU is delivered late instead of lost, so the filter never
-  // propagates across a hole
+  // Deep queue (5 s at 400 Hz): while a long update blocks the callbacks the
+  // IMU is delivered late instead of dropped
   sub_imu = _node->create_subscription<sensor_msgs::msg::Imu>(
       topic_imu, rclcpp::SensorDataQoS().keep_last(2000),
       std::bind(&ROS2Visualizer::callback_inertial, this,
@@ -352,12 +350,10 @@ void ROS2Visualizer::visualize_odometry(double timestamp) {
   if (!_app->initialized() || (timestamp - _app->initialized_time()) < 1)
     return;
 
-  // Decimate the odomimu publish (pose/twist message + TF) independent of the
-  // IMU sample rate. State propagation already happened in feed_measurement_imu()
-  // before this was called, so estimator accuracy is unaffected.
-  // The fast propagation integrates every IMU sample since the last update, so
-  // a burst of IMU queued during a stall would cost O(n^2): also skip samples
-  // that arrive within half a period of the previous propagation finishing.
+  // Decimate the odomimu publish (message + TF) independent of the IMU rate.
+  // Also skip samples that arrive within half a period of the previous fast
+  // propagation: it integrates every IMU sample since the last update, so a
+  // burst queued during a stall would cost O(n^2).
   if (odom_publish_rate_hz > 0.0) {
     double min_dt = 1.0 / odom_publish_rate_hz;
     double wall_dt = std::chrono::duration<double>(
@@ -531,7 +527,7 @@ void ROS2Visualizer::visualize_final() {
 void ROS2Visualizer::callback_sun(
     const geometry_msgs::msg::Vector3Stamped::SharedPtr msg) {
 
-  // Pubish sun sensor measurements
+  // Convert the sun direction into the two sensor angles
   ov_core::SunSensorData message;
   message.timestamp = msg->header.stamp.sec + msg->header.stamp.nanosec * 1e-9;
   message.alpha = std::atan2(msg->vector.x, msg->vector.z);

@@ -188,9 +188,8 @@ protected:
   cv::Size win_size = cv::Size(15, 15);
   DataType ransac_thresh = 0.5;
 
-  // Upper limit on the RANSAC iterations in perform_matching. RANSAC stops
-  // earlier once it is 99 % confident; the limit only binds when fewer than
-  // about 45 % of the tracks are inliers.
+  // Upper limit on the RANSAC iterations in perform_matching (RANSAC stops
+  // earlier once it is 99 % confident)
   int ransac_max_iters = 1000;
 
   // Last set of image pyramids

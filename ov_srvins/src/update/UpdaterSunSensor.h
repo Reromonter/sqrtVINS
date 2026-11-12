@@ -45,9 +45,9 @@ namespace ov_srvins {
 /**
  * @brief Corrects the global yaw of the filter using a two-axis sun sensor.
  *
- * VIO cannot observe the heading of its own world frame G: gravity pins down
- * roll and pitch, and nothing pins down the rotation about gravity. A sun
- * sensor supplies the missing second reference direction and helps to correct the yaw.
+ * VIO cannot observe the heading of its world frame G: gravity pins down roll
+ * and pitch, but not the rotation about gravity. The sun supplies the missing
+ * second reference direction.
  */
 class UpdaterSunSensor {
 
@@ -76,10 +76,7 @@ public:
    * @brief Pair readings with the state on the IMU clock and rotate the
    * chosen reading to the state time with the gyro.
    *
-   * Off, a reading is paired with the camera-clock state time and used as is,
-   * which at 40 Hz leaves up to half a period (plus the camera-IMU offset)
-   * between the attitude the reading saw and the one it is compared with:
-   * ~0.1-0.3 deg while turning, several times the sensor noise.
+   * Off, a reading is paired with the camera-clock state time and used as is.
    */
   void set_time_align(bool enable, GyroSource gyro) {
     time_align_ = enable;
@@ -88,11 +85,8 @@ public:
 
   /**
    * @brief Down-weight readings that fail the chi2 gate instead of dropping
-   * them, up to a hard limit.
-   *
-   * A failing reading gets its noise inflated until it sits on the gate, so
-   * it still pulls the state, by a bounded amount. Only a residual above
-   * @p max_residual_rad (either angle) is rejected outright.
+   * them: their noise is inflated until they sit on the gate. Only a residual
+   * above @p max_residual_rad (either angle) is rejected outright.
    */
   void set_robust(bool enable, DataType max_residual_rad) {
     robust_ = enable;
@@ -102,25 +96,19 @@ public:
   /**
    * @brief Re-acquire after a run of inconsistent readings.
    *
-   * VIO is overconfident about its global yaw: once the heading has drifted
-   * past the gate, its yaw covariance never grows enough to admit a reading
-   * again and the sun stays locked out for good. When every reading for
-   * @p after_s seconds failed the gate (rejected or down-weighted), the global
-   * yaw of the whole trajectory is inflated so the next reading can correct
-   * it. Zero disables this.
+   * When every reading for @p after_s seconds failed the gate (rejected or
+   * down-weighted), the global yaw of the whole trajectory is inflated so the
+   * next reading can correct it. Zero disables this.
    */
   void set_recovery(DataType after_s) { recover_after_s_ = after_s; }
 
   /**
    * @brief Start the filter in the ephemeris frame (ENU, true north).
    *
-   * The initializers leave the heading of G wherever the IMU pointed. With
-   * this on, the first usable reading solves the G-to-ENU yaw and turns the
-   * whole state by it (StateHelper::rotate_global_yaw), so G becomes ENU and
-   * the alignment yaw is zero. Every later reading then corrects the IMU
-   * heading directly, which is what lets calib_sun_align stay off. Applies
-   * with or without calib_sun_align, and regardless of
-   * init_align_from_first_reading.
+   * The first usable reading solves the G-to-ENU yaw and turns the whole
+   * state by it (StateHelper::rotate_global_yaw), so G becomes ENU and the
+   * alignment yaw is zero. Applies with or without calib_sun_align, and
+   * regardless of init_align_from_first_reading.
    */
   void set_init_heading(bool enable) { init_heading_ = enable; }
 
@@ -187,17 +175,13 @@ protected:
   /// Our history of sun sensor messages (time, alpha, beta)
   std::vector<ov_core::SunSensorData> sun_data_;
 
-  /// Readings arrive on the subscriber thread while try_update runs on the
-  /// update thread, exactly as with the IMU buffer in Propagator.
+  /// Guards sun_data_: fed on the subscriber thread, read on the update thread
   std::mutex sun_data_mtx_;
 
-  /// Timestamp of the reading we last consumed. A sun sensor is typically
-  /// slower than the camera, so without this the same reading would be folded
-  /// in on several consecutive frames and the filter would grow overconfident.
+  /// Timestamp of the reading we last consumed, so none is applied twice
   double last_used_timestamp_ = -1;
 
-  /// Last rejection reason we printed, so a permanently bad geometry says so
-  /// once instead of once per reading
+  /// Last rejection reason we printed, so each is only printed once
   std::string last_reject_reason_;
 
   /// See set_time_align / set_robust / set_recovery

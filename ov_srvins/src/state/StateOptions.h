@@ -60,8 +60,8 @@ struct StateOptions {
   /// Bool to determine whether or not to calibrate camera to IMU time offset
   bool do_calib_camera_timeoffset = false;
 
-  /// Bool to determine whether or not to estimate the yaw offset between the
-  /// VINS world frame G and the frame the sun ephemeris
+  /// Bool to determine whether or not to estimate the yaw between the VINS
+  /// world frame G and the sun ephemeris frame
   bool do_calib_sun_align = false;
 
   /// Max clone size of sliding window

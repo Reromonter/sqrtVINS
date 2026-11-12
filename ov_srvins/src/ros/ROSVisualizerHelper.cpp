@@ -47,7 +47,7 @@ ROSVisualizerHelper::get_ros_pointcloud(const std::vector<Vec3> &feats) {
   sensor_msgs::PointCloud2 cloud;
   cloud.header.frame_id = "global";
   cloud.header.stamp = ros::Time::now();
-  cloud.width = feats.size(); // points, not floats: "xyz" makes each point 3 floats
+  cloud.width = feats.size();
   cloud.height = 1;
   cloud.is_bigendian = false;
   cloud.is_dense = false; // there may be invalid points
@@ -108,7 +108,7 @@ ROSVisualizerHelper::get_ros_pointcloud(std::shared_ptr<rclcpp::Node> node,
   sensor_msgs::msg::PointCloud2 cloud;
   cloud.header.frame_id = "global";
   cloud.header.stamp = node->now();
-  cloud.width = feats.size(); // points, not floats: "xyz" makes each point 3 floats
+  cloud.width = feats.size();
   cloud.height = 1;
   cloud.is_bigendian = false;
   cloud.is_dense = false; // there may be invalid points

@@ -125,8 +125,7 @@ void UpdaterSunSensor::feed_sun(const ov_core::SunSensorData &message,
   std::lock_guard<std::mutex> lck(sun_data_mtx_);
   sun_data_.emplace_back(message);
 
-  // Two lower bounds, whichever discards more: anything older than the state
-  // can never be paired with it again, and nothing is kept past the cap.
+  // Drop what is older than the state or than the buffer cap
   double retain_from = message.timestamp - kMaxBufferAge;
   if (oldest_time >= 0) {
     retain_from = std::max(retain_from, oldest_time - 0.10);
@@ -259,23 +258,21 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   //=========================================================================
   // One-shot initialization of the alignment yaw
   //=========================================================================
-  // A linearized 2-DOF update cannot walk in from an arbitrary heading: the
-  // chi2 gate sees the curvature of the measurement function as inconsistency
-  // and rejects everything beyond a few degrees. So when the yaw starts out
-  // genuinely unknown, solve it outright from the first reading. With
-  // init_heading the solved yaw turns G onto ENU instead of being recorded.
+  // The linearized update cannot converge from an arbitrary heading (the chi2
+  // gate rejects everything beyond a few degrees), so the yaw is solved
+  // outright from the first reading. With init_heading the solved yaw turns G
+  // onto ENU instead of being stored.
   const bool solve_align =
       state->options.do_calib_sun_align && init_align_from_first_reading_;
   if ((init_heading_ || solve_align) && !align_initialized_) {
     const Vec3 s_meas = angles_to_unit_vector(best.alpha, best.beta);
     // The measured sun direction, carried back into G
     const Vec3 v = state->imu->Rot().transpose() * (R_ItoS_.transpose() * s_meas);
-    // rot_z turns s_ENU's horizontal bearing into v's, so the yaw is just the
-    // difference of the two bearings.
+    // v = rot_z(psi) * s_ENU, so the yaw is the difference of the two bearings
     const DataType psi_solved =
         wrap_pi(std::atan2(v(1), v(0)) - std::atan2(s_ENU(1), s_ENU(0)));
 
-    // u_G = rot_z(psi) * s_ENU, so turning G by -psi leaves G = ENU
+    // Turning G by -psi leaves G = ENU
     if (init_heading_)
       StateHelper::rotate_global_yaw(state, -psi_solved);
 
@@ -305,9 +302,8 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   const Vec3 w = state->imu->Rot() * u;                // sun in I
   const Vec3 s_pred = R_ItoS_ * w;                     // sun in S
 
-  // The sensor only reports angles for a sun in front of it, and so does the
-  // prediction: behind the boresight both atan2 branches flip and the residual
-  // would be meaningless.
+  // Behind the boresight both atan2 branches flip and the residual would be
+  // meaningless
   if (s_pred(2) <= 0.0) {
     const std::string reason = "predicted sun behind the sensor";
     if (last_reject_reason_ != reason) {
@@ -328,8 +324,7 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   //=========================================================================
   // Jacobians, at the first estimates
   //=========================================================================
-  // Exactly as the feature Jacobians do it: the residual above uses the live
-  // estimate, everything from here on is evaluated at the FEJ point.
+  // The residual above uses the live estimate, the Jacobians the FEJ point
   const bool use_fej = state->options.do_fej;
   const DataType psi_align_jacob =
       use_fej ? state->calib_sun_align_yaw->fej()(0) : psi_align;
@@ -341,10 +336,8 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
 
   const Eigen::Matrix<DataType, 2, 3> d_angles_d_s = d_angles_d_vector(s_jacob);
 
-  // Order of our Jacobian. These two are the only state elements the sun
-  // touches: the measurement is a pure direction, so it has no position, no
-  // velocity and no clone in it. Adding anything else here would let a yaw
-  // correction leak into states the sun says nothing about.
+  // Order of our Jacobian. The measurement is a pure direction, so it only
+  // involves the IMU orientation and the alignment yaw.
   std::vector<std::shared_ptr<Type>> Hx_order;
   Hx_order.push_back(state->imu->q());
   const bool calibrating_align = state->options.do_calib_sun_align;
@@ -393,9 +386,8 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
         std::max(std::abs(res(0)), std::abs(res(1))) > max_residual_rad_;
     last_used_timestamp_ = best.timestamp;
 
-    // A run of readings that all disagree with the state is the lock-out
-    // signature: re-acquire by inflating the global yaw, then let the next
-    // reading through the gate on its own merits.
+    // A run of readings that all disagree with the state: re-acquire by
+    // inflating the global yaw, so the next reading can pass the gate
     if (inconsistent_since_ < 0)
       inconsistent_since_ = timestamp;
     if (recover_after_s_ > 0 &&
@@ -434,9 +426,7 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
       return false;
     }
 
-    // Robust: inflate the noise until the reading sits on the gate. With the
-    // state's own uncertainty in S this lands a little inside it, so the pull
-    // is bounded by what a reading at the gate would do.
+    // Robust: inflate the noise until the reading sits on the gate
     noise_scale = chi2 / chi2_check;
   } else {
     inconsistent_since_ = -1;
@@ -457,8 +447,7 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   HUT.row(0) /= sigma_alpha_ * std::sqrt(noise_scale);
   HUT.row(1) /= sigma_beta_ * std::sqrt(noise_scale);
 
-  // Sun readings arrive on their own schedule rather than with the camera, so
-  // this update stands on its own instead of joining the per-frame batch.
+  // Applied on its own instead of joining the per-frame batch
   state->setup_matrix_buffer();
   state->store_update_factor(HUT, RHTr);
   StateHelper::update_llt(state);
