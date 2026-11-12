@@ -278,6 +278,11 @@ bool UpdaterLegVelocity::try_update(std::shared_ptr<State> state,
     // while, give the velocity back enough uncertainty for the legs to pull it.
     if (inconsistent_since_ < 0)
       inconsistent_since_ = timestamp;
+    // A pause between two failures (flight phase, no joint data) is not part
+    // of a run of failures: start the run again
+    if (timestamp - last_inconsistent_ > 0.5 * params_.recover_after_s)
+      inconsistent_since_ = timestamp;
+    last_inconsistent_ = timestamp;
     if (params_.recover_after_s > 0 &&
         timestamp - inconsistent_since_ >= params_.recover_after_s) {
       DataType worst = 0.0;

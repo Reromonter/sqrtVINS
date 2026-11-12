@@ -398,6 +398,11 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
     // reading through the gate on its own merits.
     if (inconsistent_since_ < 0)
       inconsistent_since_ = timestamp;
+    // A pause between two failures (no reading in between) is not part of a
+    // run of failures: start the run again
+    if (timestamp - last_inconsistent_ > 0.5 * recover_after_s_)
+      inconsistent_since_ = timestamp;
+    last_inconsistent_ = timestamp;
     if (recover_after_s_ > 0 &&
         timestamp - inconsistent_since_ >= recover_after_s_) {
       const DataType sigma = std::min(
