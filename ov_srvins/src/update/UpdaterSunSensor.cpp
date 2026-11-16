@@ -56,6 +56,10 @@ constexpr double kMaxBufferAge = 5.0;
 /// State time between two "[SUN]: last N s" statistics lines
 constexpr double kStatsPeriod = 10.0;
 
+/// Yaw-only: below this many sigmas of angle per radian of heading the sun
+/// direction says nothing about the heading (it stands on the vertical)
+constexpr double kMinYawGain = 1e-3;
+
 /// Bounds on the global yaw sigma a re-acquisition adds (rad)
 constexpr double kMinRecoverSigma = 0.5 * M_PI / 180.0;
 constexpr double kMaxRecoverSigma = 30.0 * M_PI / 180.0;
@@ -368,23 +372,71 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
   }
 
   //=========================================================================
+  // Rows that go into the filter
+  //=========================================================================
+  // By default both angles, each with its own noise. Yaw-only keeps the one
+  // combination of them that a change in sun elevation does not move and
+  // drops the other, see set_yaw_only().
+  MatX H_upd = H_x;
+  VecX res_upd = res;
+  VecX sigma_upd = Vec2(sigma_alpha_, sigma_beta_);
+  if (yaw_only_) {
+    // A yaw error dpsi of G is the attitude error dtheta = g_I * dpsi, with
+    // g_I the vertical seen from the IMU. It moves the predicted sun along
+    // its circle of constant elevation, a tilt can also move it across.
+    const Vec3 g_I = R_GtoI_jacob * Vec3(0.0, 0.0, 1.0);
+    const Vec3 along = R_ItoS_ * w_jacob.cross(g_I); // d(s_pred)/d(psi)
+    const Vec3 across = s_jacob.cross(along);        // towards the zenith
+    // The row that is blind to a move across, scaled to unit noise
+    const Vec2 b = d_angles_d_s * across;
+    Eigen::Matrix<DataType, 1, 2> l;
+    l << b(1), -b(0);
+    const DataType l_sigma =
+        std::sqrt(l(0) * l(0) * sigma_alpha_ * sigma_alpha_ +
+                  l(1) * l(1) * sigma_beta_ * sigma_beta_);
+    // Radians of residual, in sigmas, per radian of heading
+    const DataType gain =
+        l_sigma > 0 ? (l * H_x.leftCols<3>() * g_I)(0) / l_sigma : 0.0;
+    if (std::abs(gain) < kMinYawGain) {
+      const std::string reason = "no yaw sensitivity";
+      if (last_reject_reason_ != reason) {
+        last_reject_reason_ = reason;
+        PRINT_INFO(YELLOW "[SUN]: rejecting readings - the sun direction "
+                          "does not move with the heading here\n" RESET);
+      }
+      return false;
+    }
+    l /= l_sigma;
+    H_upd = MatX::Zero(1, h_size);
+    H_upd.leftCols<3>() = gain * g_I.transpose();
+    if (calibrating_align)
+      H_upd.rightCols<1>() = l * H_x.rightCols<1>();
+    res_upd = l * res;
+    sigma_upd = VecX::Ones(1);
+  }
+
+  //=========================================================================
   // Chi2 gate and square-root update
   //=========================================================================
   MatX U_dense, U_tri;
   StateHelper::get_marginal_U_block(state, Hx_order, U_dense, U_tri);
-  MatX HUT = MatX::Zero(H_x.rows(), U_dense.rows() + U_tri.rows());
-  HUT.leftCols(U_dense.rows()).noalias() = H_x * U_dense.transpose();
+  MatX HUT = MatX::Zero(H_upd.rows(), U_dense.rows() + U_tri.rows());
+  HUT.leftCols(U_dense.rows()).noalias() = H_upd * U_dense.transpose();
   HUT.rightCols(U_tri.rows()).noalias() =
-      H_x * U_tri.transpose().triangularView<Eigen::Lower>();
+      H_upd * U_tri.transpose().triangularView<Eigen::Lower>();
 
-  const DataType sigma_alpha_sq = sigma_alpha_ * sigma_alpha_;
-  const DataType sigma_beta_sq = sigma_beta_ * sigma_beta_;
+  const VecX sigma_sq = sigma_upd.cwiseAbs2();
 
-  Mat2 S = HUT * HUT.transpose();
-  S.diagonal() += Vec2(sigma_alpha_sq, sigma_beta_sq);
-  const DataType chi2 = res.dot(S.llt().solve(res));
+  DataType chi2;
+  if (yaw_only_) {
+    chi2 = res_upd(0) * res_upd(0) / (HUT.squaredNorm() + sigma_sq(0));
+  } else {
+    Mat2 S = HUT * HUT.transpose();
+    S.diagonal() += Vec2(sigma_sq(0), sigma_sq(1));
+    chi2 = res.dot(S.llt().solve(res));
+  }
   const DataType chi2_check =
-      options_.chi2_multipler * chi_squared_table_[(int)res.rows()];
+      options_.chi2_multipler * chi_squared_table_[(int)res_upd.rows()];
 
   // How much the noise is inflated for this reading (1 = as configured)
   DataType noise_scale = 1.0;
@@ -444,18 +496,20 @@ bool UpdaterSunSensor::try_update(std::shared_ptr<State> state,
 
   // Scatter H^T * R^-1 * res into a full-state vector, by variable id
   VecX RHTr = VecX::Zero(state->get_state_size());
-  const Vec2 R_inv_res(res(0) / (sigma_alpha_sq * noise_scale),
-                       res(1) / (sigma_beta_sq * noise_scale));
+  VecX R_inv_res(res_upd.rows());
+  for (int i = 0; i < res_upd.rows(); i++)
+    R_inv_res(i) = res_upd(i) / (sigma_sq(i) * noise_scale);
   int local_id = 0;
   for (const auto &var : Hx_order) {
     RHTr.middleRows(var->id(), var->size()).noalias() +=
-        H_x.block(0, local_id, H_x.rows(), var->size()).transpose() * R_inv_res;
+        H_upd.block(0, local_id, H_upd.rows(), var->size()).transpose() *
+        R_inv_res;
     local_id += var->size();
   }
 
   // Whiten: R^(-1/2) * H * U^T, one scale per measurement row
-  HUT.row(0) /= sigma_alpha_ * std::sqrt(noise_scale);
-  HUT.row(1) /= sigma_beta_ * std::sqrt(noise_scale);
+  for (int i = 0; i < HUT.rows(); i++)
+    HUT.row(i) /= sigma_upd(i) * std::sqrt(noise_scale);
 
   // Sun readings arrive on their own schedule rather than with the camera, so
   // this update stands on its own instead of joining the per-frame batch.
