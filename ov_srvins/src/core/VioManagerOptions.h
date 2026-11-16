@@ -199,6 +199,10 @@ struct VioManagerOptions {
   /// (UpdaterSunSensor::set_init_heading). Meant for calib_sun_align off.
   bool sun_init_heading = false;
 
+  /// Use a sun reading for the heading only (1 DOF about gravity) and keep it
+  /// out of roll and pitch (UpdaterSunSensor::set_yaw_only)
+  bool sun_yaw_only = false;
+
   /// Pair sun readings with the state on the IMU clock and rotate the reading
   /// to the state time with the gyro (UpdaterSunSensor::set_time_align)
   bool sun_time_align = false;

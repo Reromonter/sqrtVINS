@@ -124,6 +124,24 @@ public:
    */
   void set_init_heading(bool enable) { init_heading_ = enable; }
 
+  /**
+   * @brief Let a reading correct the heading only, not the tilt.
+   *
+   * A sun direction also fixes one axis of roll/pitch, and it does so with
+   * the sensor's absolute accuracy (mounting, calibration residual), which is
+   * well below what gravity gives the filter. Left on all three axes, a
+   * constant offset of a few tenths of a degree between the two tilts the
+   * attitude and with it the whole trajectory. With this on, the two angles
+   * are reduced to the one combination that a change of the sun's elevation
+   * does not move, and only that enters the filter, as a correction about
+   * gravity (1 DOF, gated at chi2 with 1 DOF). The elevation mismatch is
+   * dropped. Roll and pitch then change only through their correlation with
+   * the heading. A tilt error about the sun's own bearing still reads as
+   * heading, by tan(elevation) of its size: no single direction can tell the
+   * two apart.
+   */
+  void set_yaw_only(bool enable) { yaw_only_ = enable; }
+
   /// Residual (measured - predicted angles, rad) of the last reading that
   /// reached the gate, accepted or not
   Vec2 last_residual() const { return last_residual_; }
@@ -207,6 +225,7 @@ protected:
   DataType max_residual_rad_ = 5.0 * M_PI / 180.0;
   DataType recover_after_s_ = 0.0;
   bool init_heading_ = false;
+  bool yaw_only_ = false;
   Vec2 last_residual_ = Vec2::Zero();
 
   /// State time of the first reading of the current run of readings that

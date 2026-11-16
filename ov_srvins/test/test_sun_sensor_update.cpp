@@ -25,7 +25,8 @@
  */
 
 // Closed-loop checks of the sun update's time alignment, robust gate, lock-out
-// recovery and heading initialization, against a synthetic State (no camera).
+// recovery, heading initialization and yaw-only mode, against a synthetic State
+// (no camera).
 // The math of the measurement model itself is covered by the hand-built
 // harness in lunarleaper-state-estimation/tests/cpp/test_sun_sensor_updater.cpp.
 
@@ -360,4 +361,62 @@ TEST(SunSensorUpdate, InitHeadingWithCalibrationZeroesTheAlignmentYaw) {
       EXPECT_LT(angle_deg(rig.state->imu->Rot(), R_GtoI), 0.01);
     }
   }
+}
+
+TEST(SunSensorUpdate, YawOnlyCorrectsTheHeadingAndLeavesTheTilt) {
+  // The estimate is off by 0.5 deg of heading and by 0.3 deg of tilt about
+  // the horizontal axis square to the sun's bearing, which is the tilt a sun
+  // reading sees in full (as an elevation mismatch). The full update shares
+  // that mismatch with roll/pitch; yaw-only takes the heading and nothing else.
+  const Vec3 e_z(0.0, 0.0, 1.0);
+  const Vec3 tilt_axis = e_z.cross(ephemeris()).normalized();
+  const Mat3 R_true = ov_core::exp_so3(Vec3(0.2, -0.1, 0.7));
+  const Mat3 R_start = R_true * ov_core::rot_z<DataType>(0.5 * kDeg) *
+                       ov_core::exp_so3(Vec3(tilt_axis * (0.3 * kDeg)));
+  for (bool yaw_only : {false, true}) {
+    Rig rig(0.0044, false);
+    rig.psi_true = 0.0; // no alignment state: G is ENU
+    rig.sun->set_yaw_only(yaw_only);
+    rig.set_attitude(R_start);
+    StateHelper::inflate_global_yaw(rig.state, 2.0 * kDeg);
+    int used = 0;
+    for (int k = 0; k < 25; k++) {
+      const double t = 0.2 * k;
+      rig.sun->feed_sun(rig.reading(t, R_true), t);
+      used += rig.update(t);
+    }
+    EXPECT_GT(used, 20) << "yaw_only " << yaw_only;
+
+    const Mat3 R_end = rig.state->imu->Rot();
+    // Tilt: how far the vertical moved in the IMU frame
+    const DataType tilt_moved_deg =
+        std::acos(std::min((DataType)1.0,
+                           (R_end * e_z).dot(R_start * e_z))) / kDeg;
+    // What is left of the error, as a rotation of G
+    const Vec3 err = ov_core::log_so3(Mat3(R_true.transpose() * R_end)) / kDeg;
+    if (yaw_only) {
+      EXPECT_LT(tilt_moved_deg, 0.02);
+      EXPECT_LT(std::abs(err(2)), 0.03);
+      EXPECT_NEAR(err.head<2>().norm(), 0.3, 0.03);
+    } else {
+      EXPECT_GT(tilt_moved_deg, 0.05) << "the full update pulls the tilt";
+    }
+  }
+}
+
+TEST(SunSensorUpdate, YawOnlyCalibratesTheAlignmentYaw) {
+  // With the alignment yaw in the state, yaw-only still walks in to it: a
+  // 0.3 deg step of the true alignment is followed within a few readings.
+  Rig rig(0.0044);
+  rig.sun->set_yaw_only(true);
+  rig.converge();
+  StateHelper::inflate_global_yaw(rig.state, 1.0 * kDeg);
+  int used = 0;
+  for (int k = 1; k <= 40; k++) {
+    const double t = 5.0 + 0.2 * k;
+    rig.sun->feed_sun(rig.reading(t, Mat3::Identity(), 0.3 * kDeg), t - 0.1);
+    used += rig.update(t);
+  }
+  EXPECT_GT(used, 30);
+  EXPECT_LT(rig.sun->last_residual().norm() / kDeg, 0.05);
 }

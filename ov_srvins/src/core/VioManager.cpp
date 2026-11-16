@@ -209,15 +209,17 @@ VioManager::VioManager(VioManagerOptions &params_)
                            params.sun_max_residual_deg * M_PI / 180.0);
     updaterSun->set_recovery(params.sun_recover_after_s);
     updaterSun->set_init_heading(params.sun_init_heading);
+    updaterSun->set_yaw_only(params.sun_yaw_only);
     // INFO, not DEBUG: an image without these keys ignores them silently, so
     // this line is how a run log proves which update it actually ran
     PRINT_INFO("[SUN]: update mode: sigma %.5f / %.5f rad, chi2 x%.1f, "
                "time_align %d, robust %d (max residual %.1f deg), recover "
-               "after %.1f s, init_heading %d\n",
+               "after %.1f s, init_heading %d, yaw_only %d\n",
                params.sun_sigma_alpha, params.sun_sigma_beta,
                params.sun_options.chi2_multipler, params.sun_time_align,
                params.sun_robust, params.sun_max_residual_deg,
-               params.sun_recover_after_s, params.sun_init_heading);
+               params.sun_recover_after_s, params.sun_init_heading,
+               params.sun_yaw_only);
     // With the alignment yaw free and its prior wide, later readings put most
     // of the heading drift into psi_align, and G slides off ENU again
     if (params.sun_init_heading && params.state_options.do_calib_sun_align) {
